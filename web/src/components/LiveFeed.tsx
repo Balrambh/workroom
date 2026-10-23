@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { Activity, RoomActions, RoomState } from '../lib/types';
-import { initial, presenceMeta, timeAgo } from '../lib/format';
-import { ActivityIcon, BotIcon, BranchIcon, ChatIcon, CheckIcon, UsersIcon } from './Icons';
+import { presenceMeta, timeAgo } from '../lib/format';
+import { ActivityIcon, BranchIcon, ChatIcon, CheckIcon, UsersIcon } from './Icons';
 
 interface LiveFeedProps {
   state: RoomState;
@@ -43,7 +43,6 @@ export function LiveFeed({ state, actions }: LiveFeedProps) {
     setTaskId(myPresence.taskId ?? '');
   }, [myPresence?.status, myPresence?.activity, myPresence?.taskId]);
 
-  const activePeople = state.presence.filter((entry) => entry.status !== 'offline').length;
   const myOpenTasks = state.tasks.filter(
     (task) =>
       task.assigneeType === state.me.type &&
@@ -59,39 +58,6 @@ export function LiveFeed({ state, actions }: LiveFeedProps) {
 
   return (
     <div className="panel-scroll">
-      <section className="panel-section">
-        <div className="panel-heading">
-          <span>Live now</span>
-          <span className="section-count">{activePeople} active</span>
-        </div>
-        <div className="presence-list">
-          {state.presence.map((person) => {
-            const meta = presenceMeta[person.status];
-            const task = person.taskId ? state.tasks.find((candidate) => candidate.id === person.taskId) : null;
-            return (
-              <div className="presence-row" key={`${person.type}-${person.id}`}>
-                <span className={`status-dot ${meta.tone}`} />
-                <span className={`avatar avatar-sm ${person.type === 'agent' ? 'avatar-agent' : ''}`}>
-                  {person.type === 'agent' ? <BotIcon size={13} /> : initial(person.name)}
-                </span>
-                <div className="presence-main">
-                  <div className="presence-name">
-                    {person.name}
-                    {person.type === 'agent' ? <span className="tag tag-violet">agent</span> : null}
-                    {person.role === 'admin' ? <span className="tag tag-amber">admin</span> : null}
-                  </div>
-                  <div className="presence-activity">
-                    {person.activity || (person.status === 'offline' ? `Last seen ${timeAgo(person.lastSeen)}` : meta.label)}
-                  </div>
-                  {task ? <div className="presence-task">{task.title}</div> : null}
-                </div>
-                <span className={`presence-state ${meta.tone}`}>{meta.label}</span>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
       {state.me.role !== 'viewer' ? (
         <section className="status-editor">
           <div className="panel-heading">
@@ -136,7 +102,7 @@ export function LiveFeed({ state, actions }: LiveFeedProps) {
 
       <section className="panel-section">
         <div className="panel-heading">
-          <span>Work log</span>
+          <span>Room activity</span>
           <span className="section-count">{state.activity.length} events</span>
         </div>
         <div className="activity-list">
