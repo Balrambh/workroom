@@ -83,6 +83,12 @@ export const ChatIcon = (props: IconProps) => (
   </Icon>
 );
 
+export const LightbulbIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M9 18h6M10 21h4M8.5 14.5a5.5 5.5 0 1 1 7 0c-.9.8-1.5 1.7-1.5 2.5h-4c0-.8-.6-1.7-1.5-2.5Z" />
+  </Icon>
+);
+
 export const BotIcon = (props: IconProps) => (
   <Icon {...props}>
     <rect x="4" y="8" width="16" height="11" rx="3" />
