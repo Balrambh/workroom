@@ -190,7 +190,9 @@ db.exec(`
 
 /* Backfill sequence numbers so existing rooms can catch up with after_seq. */
 const unsequenced = db
-  .prepare('SELECT id, room_id FROM messages WHERE seq IS NULL ORDER BY room_id, created_at, rowid')
+  .prepare(
+    'SELECT id, room_id FROM messages WHERE seq IS NULL OR seq = 0 ORDER BY room_id, created_at, rowid',
+  )
   .all() as { id: string; room_id: string }[];
 if (unsequenced.length) {
   const counters = new Map<string, number>();
@@ -214,3 +216,10 @@ if (unsequenced.length) {
     throw error;
   }
 }
+
+/* Keep last_seq at least as high as the highest seq actually stored. */
+db.exec(`
+  UPDATE rooms
+  SET last_seq = MAX(last_seq, COALESCE((SELECT MAX(seq) FROM messages WHERE messages.room_id = rooms.id), 0))
+  WHERE last_seq < COALESCE((SELECT MAX(seq) FROM messages WHERE messages.room_id = rooms.id), 0)
+`);
