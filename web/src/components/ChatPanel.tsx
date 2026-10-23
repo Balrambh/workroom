@@ -45,7 +45,6 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
   const [text, setText] = useState(() => drafts.get(state.room.id) ?? '');
   const [kind, setKind] = useState<(typeof KIND_OPTIONS)[number]['value']>('chat');
   const listRef = useRef<HTMLDivElement | null>(null);
-  const endRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickToBottom = useRef(true);
   const readOnly = state.me.role === 'viewer';
@@ -53,12 +52,14 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
 
   useEffect(() => {
     stickToBottom.current = true;
-    endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
   }, [state.room.id]);
 
   useEffect(() => {
     if (!stickToBottom.current) return;
-    endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    const list = listRef.current;
+    if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
   }, [state.messages.length]);
 
   useEffect(() => {
@@ -67,7 +68,8 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
     input.style.height = 'auto';
     input.style.height = `${Math.min(Math.max(input.scrollHeight, 26), 160)}px`;
     if (stickToBottom.current) {
-      endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      const list = listRef.current;
+      if (list) list.scrollTop = list.scrollHeight;
     }
   }, [text]);
 
@@ -150,7 +152,6 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
             </div>
           );
         })}
-        <div ref={endRef} />
       </div>
 
       <div className="composer">
