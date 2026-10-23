@@ -89,6 +89,52 @@ export const LightbulbIcon = (props: IconProps) => (
   </Icon>
 );
 
+export const HeadphonesIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M4 14v-1.5a8 8 0 0 1 16 0V14" />
+    <rect x="3" y="13.5" width="4.5" height="6.5" rx="2" />
+    <rect x="16.5" y="13.5" width="4.5" height="6.5" rx="2" />
+  </Icon>
+);
+
+export const HeadphonesOffIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M4 14v-1.5a8 8 0 0 1 12.3-6.9M20 12.5V14" />
+    <rect x="3" y="13.5" width="4.5" height="6.5" rx="2" />
+    <rect x="16.5" y="13.5" width="4.5" height="6.5" rx="2" />
+    <path d="m3.5 3.5 17 17" />
+  </Icon>
+);
+
+export const MicIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <rect x="9" y="3" width="6" height="11" rx="3" />
+    <path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3M8.5 21h7" />
+  </Icon>
+);
+
+export const MicOffIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M9 9v2a3 3 0 0 0 4.6 2.6M15 10V6a3 3 0 0 0-5.6-1.5M5.5 11.5a6.5 6.5 0 0 0 10 5.6M12 18v3M8.5 21h7" />
+    <path d="m3.5 3.5 17 17" />
+  </Icon>
+);
+
+export const PhoneOffIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M4 13.5c4.2-3.6 11.8-3.6 16 0l-2 3.2-3.2-1.1v-2.2a11.5 11.5 0 0 0-5.6 0v2.2L6 16.7 4 13.5Z" />
+    <path d="m20 4-16 16" />
+  </Icon>
+);
+
+export const SlidersIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M4 7h8M18 7h2M4 17h2M12 17h8" />
+    <circle cx="15" cy="7" r="2" />
+    <circle cx="9" cy="17" r="2" />
+  </Icon>
+);
+
 export const BotIcon = (props: IconProps) => (
   <Icon {...props}>
     <rect x="4" y="8" width="16" height="11" rx="3" />

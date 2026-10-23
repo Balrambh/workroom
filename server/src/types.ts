@@ -140,6 +140,17 @@ export interface JoinRequest {
   triggerUrl?: string | null;
 }
 
+export interface VoiceParticipant {
+  peerId: string;
+  type: PrincipalType;
+  id: string;
+  name: string;
+  role: Role;
+  muted: boolean;
+  deafened: boolean;
+  joinedAt: string;
+}
+
 export interface AgentRuntime {
   id: string;
   roomId: string;
@@ -161,5 +172,6 @@ export interface RoomState {
   activity: Activity[];
   messages: Message[];
   presence: PresenceEntry[];
+  voice: VoiceParticipant[];
   joinRequests?: JoinRequest[];
 }

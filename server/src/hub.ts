@@ -14,6 +14,7 @@ import type {
   Principal,
   Role,
   RoomState,
+  VoiceParticipant,
 } from './types.js';
 
 interface Client {
@@ -37,9 +38,15 @@ interface LivePresence {
   lastSeen: string;
 }
 
+interface VoiceSession {
+  ws: WebSocket;
+  participant: VoiceParticipant;
+}
+
 const clients = new Map<WebSocket, Client>();
 const pendingClients = new Map<WebSocket, PendingClient>();
 const presence = new Map<string, Map<string, LivePresence>>();
+const voiceRooms = new Map<string, Map<string, VoiceSession>>();
 const agentSockets = new Map<string, WebSocket>();
 const agentMessageTimes = new Map<string, number[]>();
 const pausedRooms = new Set<string>();
@@ -178,6 +185,54 @@ export function broadcastJoinRequests(roomId: string): void {
   }
 }
 
+/* Voice is an ephemeral mesh: the server keeps the roster and relays SDP/ICE,
+ * while audio itself flows peer to peer. Nothing here touches the database. */
+export function voiceParticipants(roomId: string): VoiceParticipant[] {
+  const room = voiceRooms.get(roomId);
+  if (!room) return [];
+  return [...room.values()]
+    .map((session) => session.participant)
+    .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt));
+}
+
+function broadcastVoice(roomId: string): void {
+  broadcast(roomId, { type: 'voice.participants', participants: voiceParticipants(roomId) });
+}
+
+function removeVoiceForSocket(ws: WebSocket, onlyRoomId?: string): void {
+  const roomIds = onlyRoomId ? [onlyRoomId] : [...voiceRooms.keys()];
+  const changed = new Set<string>();
+  for (const roomId of roomIds) {
+    const room = voiceRooms.get(roomId);
+    if (!room) continue;
+    for (const [peerId, session] of [...room]) {
+      if (session.ws !== ws) continue;
+      room.delete(peerId);
+      changed.add(roomId);
+    }
+    if (room.size === 0) voiceRooms.delete(roomId);
+  }
+  for (const roomId of changed) broadcastVoice(roomId);
+}
+
+function removeVoiceForPrincipal(roomId: string, type: string, id: string): void {
+  const room = voiceRooms.get(roomId);
+  if (!room) return;
+  let changed = false;
+  for (const [peerId, session] of [...room]) {
+    if (session.participant.type !== type || session.participant.id !== id) continue;
+    room.delete(peerId);
+    changed = true;
+    send(session.ws, {
+      type: 'voice.replaced',
+      roomId,
+      message: 'You no longer have access to this room’s voice channel.',
+    });
+  }
+  if (room.size === 0) voiceRooms.delete(roomId);
+  if (changed) broadcastVoice(roomId);
+}
+
 export function buildRoomState(roomId: string, principal: Principal): RoomState | null {
   const membership = store.getMembership(roomId, principal);
   const room = store.getRoom(roomId);
@@ -192,6 +247,7 @@ export function buildRoomState(roomId: string, principal: Principal): RoomState 
     activity: store.listActivity(roomId, 80),
     messages: store.listMessages(roomId, undefined, 80),
     presence: presenceList(roomId),
+    voice: voiceParticipants(roomId),
     ...(membership.role === 'admin'
       ? { joinRequests: store.listPendingJoinRequests(roomId) }
       : {}),
@@ -229,6 +285,7 @@ export function setPresence(
 
 export function evictFromRoom(roomId: string, type: string, id: string): void {
   presence.get(roomId)?.delete(principalKey(type, id));
+  removeVoiceForPrincipal(roomId, type, id);
   for (const client of clients.values()) {
     if (client.rooms.has(roomId) && client.principal.type === type && client.principal.id === id) {
       client.rooms.delete(roomId);
@@ -377,6 +434,7 @@ function handleJoin(client: Client, roomId: string): void {
 function handleLeave(client: Client, roomId: string): void {
   if (!client.rooms.has(roomId)) return;
   client.rooms.delete(roomId);
+  removeVoiceForSocket(client.ws, roomId);
   markOfflineIfGone(roomId, client.principal);
 }
 
@@ -463,6 +521,125 @@ function handlePresenceSet(client: Client, payload: Record<string, unknown>): vo
   }
 }
 
+/* ------------------------------ voice mesh ------------------------------- */
+
+const PEER_ID_PATTERN = /^[A-Za-z0-9_-]{6,80}$/;
+const MAX_SIGNAL_BYTES = 60_000;
+
+function voiceError(client: Client, roomId: string, message: string): void {
+  send(client.ws, { type: 'voice.error', roomId, message });
+}
+
+function handleVoiceJoin(client: Client, payload: Record<string, unknown>): void {
+  const roomId = roomIdFor(client, payload);
+  const membership = store.getMembership(roomId, client.principal);
+  if (!membership) return voiceError(client, roomId, 'You are not a member of this room.');
+  if (client.principal.type !== 'user') {
+    return voiceError(client, roomId, 'Only people can join a voice channel.');
+  }
+  if (membership.role === 'viewer') {
+    return voiceError(client, roomId, 'Viewers can follow the room but cannot join voice.');
+  }
+
+  const peerId = String(payload.peerId ?? '').trim();
+  if (!PEER_ID_PATTERN.test(peerId)) {
+    return voiceError(client, roomId, 'Could not start voice. Try again.');
+  }
+
+  let room = voiceRooms.get(roomId);
+  if (!room) {
+    room = new Map();
+    voiceRooms.set(roomId, room);
+  }
+
+  for (const [otherId, session] of [...room]) {
+    if (session.ws === client.ws) room.delete(otherId);
+  }
+  const collision = room.get(peerId);
+  if (collision && collision.ws !== client.ws) {
+    send(collision.ws, {
+      type: 'voice.replaced',
+      roomId,
+      message: 'Voice moved to another tab or device.',
+    });
+    room.delete(peerId);
+  }
+
+  const existing = [...room.values()]
+    .map((session) => session.participant)
+    .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt));
+
+  room.set(peerId, {
+    ws: client.ws,
+    participant: {
+      peerId,
+      type: client.principal.type,
+      id: client.principal.id,
+      name: client.principal.name,
+      role: membership.role,
+      muted: payload.muted === true,
+      deafened: payload.deafened === true,
+      joinedAt: nowIso(),
+    },
+  });
+
+  send(client.ws, { type: 'voice.joined', roomId, self: peerId, participants: existing });
+  broadcastVoice(roomId);
+}
+
+function handleVoiceUpdate(client: Client, payload: Record<string, unknown>): void {
+  const roomId = roomIdFor(client, payload);
+  const peerId = String(payload.peerId ?? '');
+  const session = voiceRooms.get(roomId)?.get(peerId);
+  if (!session || session.ws !== client.ws) return;
+
+  const wasMuted = session.participant.muted;
+  const wasDeafened = session.participant.deafened;
+  if (typeof payload.muted === 'boolean') session.participant.muted = payload.muted;
+  if (typeof payload.deafened === 'boolean') session.participant.deafened = payload.deafened;
+
+  if (wasMuted !== session.participant.muted || wasDeafened !== session.participant.deafened) {
+    broadcastVoice(roomId);
+  }
+}
+
+function handleVoiceSignal(client: Client, payload: Record<string, unknown>): void {
+  const roomId = roomIdFor(client, payload);
+  const room = voiceRooms.get(roomId);
+  if (!room) return;
+
+  const from = String(payload.from ?? '');
+  const to = String(payload.to ?? '');
+  if (!from || !to || from === to) return;
+
+  const sender = room.get(from);
+  const target = room.get(to);
+  if (!sender || sender.ws !== client.ws || !target) return;
+
+  const raw = payload.data;
+  if (!raw || typeof raw !== 'object') return;
+  const data = raw as Record<string, unknown>;
+  const signal: Record<string, unknown> = {};
+  if (data.description && typeof data.description === 'object') signal.description = data.description;
+  if (data.candidate && typeof data.candidate === 'object') signal.candidate = data.candidate;
+  if (!signal.description && !signal.candidate) return;
+  if (JSON.stringify(signal).length > MAX_SIGNAL_BYTES) return;
+
+  send(target.ws, { type: 'voice.signal', roomId, from, data: signal });
+}
+
+function handleVoiceLeave(client: Client, payload: Record<string, unknown>): void {
+  const roomId = roomIdFor(client, payload);
+  const room = voiceRooms.get(roomId);
+  if (!room) return;
+  const peerId = String(payload.peerId ?? '');
+  const session = room.get(peerId);
+  if (!session || session.ws !== client.ws) return;
+  room.delete(peerId);
+  if (room.size === 0) voiceRooms.delete(roomId);
+  broadcastVoice(roomId);
+}
+
 function handleClientMessage(client: Client, raw: RawData): void {
   let payload: Record<string, unknown>;
   try {
@@ -483,6 +660,18 @@ function handleClientMessage(client: Client, raw: RawData): void {
       break;
     case 'presence.set':
       handlePresenceSet(client, payload);
+      break;
+    case 'voice.join':
+      handleVoiceJoin(client, payload);
+      break;
+    case 'voice.update':
+      handleVoiceUpdate(client, payload);
+      break;
+    case 'voice.signal':
+      handleVoiceSignal(client, payload);
+      break;
+    case 'voice.leave':
+      handleVoiceLeave(client, payload);
       break;
     case 'ping':
       send(client.ws, { type: 'pong' });
@@ -589,7 +778,7 @@ export function rejectJoinRequestSocket(requestId: string, message: string): voi
 }
 
 export function attachHub(server: HttpServer): void {
-  const wss = new WebSocketServer({ server, path: '/ws' });
+  const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 128 * 1024 });
 
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '/ws', 'http://localhost');
@@ -629,6 +818,7 @@ export function attachHub(server: HttpServer): void {
 
     ws.on('close', () => {
       pendingClients.delete(ws);
+      removeVoiceForSocket(ws);
       const client = clients.get(ws);
       if (!client) return;
       clients.delete(ws);

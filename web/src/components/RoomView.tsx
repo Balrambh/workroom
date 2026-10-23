@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomActions, RoomState } from '../lib/types';
+import { useRoomVoice } from '../lib/useRoomVoice';
 import { ChatPanel } from './ChatPanel';
 import { RightPanel } from './RightPanel';
 import type { PanelTab } from './RightPanel';
@@ -9,12 +10,25 @@ interface RoomViewProps {
   state: RoomState;
   actions: RoomActions;
   connected: boolean;
+  socket: WebSocket | null;
   navOpen: boolean;
   onOpenNav: () => void;
 }
 
-export function RoomView({ state, actions, connected, navOpen, onOpenNav }: RoomViewProps) {
+export function RoomView({
+  state,
+  actions,
+  connected,
+  socket,
+  navOpen,
+  onOpenNav,
+}: RoomViewProps) {
   const isCode = state.room.mode === 'code';
+  const voice = useRoomVoice({
+    socket,
+    roomId: state.room.id,
+    participants: state.voice ?? [],
+  });
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelTab>('live');
   const pendingRequests = state.me.role === 'admin' ? state.joinRequests ?? [] : [];
@@ -145,7 +159,13 @@ export function RoomView({ state, actions, connected, navOpen, onOpenNav }: Room
       ) : null}
 
       <div className="room-body">
-        <ChatPanel state={state} actions={actions} key={state.room.id} />
+        <ChatPanel
+          state={state}
+          actions={actions}
+          voice={voice}
+          connected={connected}
+          key={state.room.id}
+        />
         <div
           className={`room-aside ${detailsOpen ? 'open' : ''}`}
           id="room-details-panel"
