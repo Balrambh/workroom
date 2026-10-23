@@ -1,0 +1,486 @@
+import type { Server as HttpServer } from 'node:http';
+import { WebSocketServer, WebSocket } from 'ws';
+import type { RawData } from 'ws';
+import { resolveToken } from './auth.js';
+import * as store from './store.js';
+import type {
+  Member,
+  MessageKind,
+  PresenceEntry,
+  PresenceStatus,
+  Principal,
+  Role,
+  RoomState,
+} from './types.js';
+
+interface Client {
+  ws: WebSocket;
+  principal: Principal;
+  rooms: Set<string>;
+  alive: boolean;
+}
+
+interface PendingClient {
+  ws: WebSocket;
+  requestId: string;
+  roomId: string;
+  alive: boolean;
+}
+
+interface LivePresence {
+  status: PresenceStatus;
+  activity: string;
+  taskId: string | null;
+  lastSeen: string;
+}
+
+const clients = new Map<WebSocket, Client>();
+const pendingClients = new Map<WebSocket, PendingClient>();
+const presence = new Map<string, Map<string, LivePresence>>();
+
+const PRESENCE_STATUSES = new Set<PresenceStatus>(['online', 'working', 'reviewing', 'away', 'offline']);
+const MESSAGE_KINDS = new Set<MessageKind>(['chat', 'instruction', 'suggestion']);
+const STATUS_LABEL: Record<string, string> = {
+  todo: 'To do',
+  doing: 'In progress',
+  review: 'Review',
+  done: 'Done',
+};
+
+const principalKey = (type: string, id: string) => `${type}:${id}`;
+const nowIso = () => new Date().toISOString();
+
+function send(ws: WebSocket, payload: unknown): void {
+  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+}
+
+function truncate(text: string, max = 90): string {
+  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+}
+
+function presenceEntry(roomId: string, type: string, id: string): LivePresence | undefined {
+  return presence.get(roomId)?.get(principalKey(type, id));
+}
+
+function ensurePresence(roomId: string, principal: Principal): LivePresence {
+  let roomPresence = presence.get(roomId);
+  if (!roomPresence) {
+    roomPresence = new Map();
+    presence.set(roomId, roomPresence);
+  }
+  const key = principalKey(principal.type, principal.id);
+  const existing = roomPresence.get(key);
+  if (existing) {
+    if (existing.status === 'offline') existing.status = 'online';
+    existing.lastSeen = nowIso();
+    return existing;
+  }
+  const entry: LivePresence = {
+    status: 'online',
+    activity: '',
+    taskId: null,
+    lastSeen: nowIso(),
+  };
+  roomPresence.set(key, entry);
+  return entry;
+}
+
+export function presenceList(roomId: string): PresenceEntry[] {
+  const members = store.listMembers(roomId);
+  const live = presence.get(roomId);
+  const rank: Record<PresenceStatus, number> = {
+    working: 0,
+    reviewing: 1,
+    online: 2,
+    away: 3,
+    offline: 4,
+  };
+  return members
+    .map((member) => {
+      const entry = live?.get(principalKey(member.type, member.id));
+      return {
+        type: member.type,
+        id: member.id,
+        name: member.name,
+        role: member.role,
+        status: (entry?.status ?? 'offline') as PresenceStatus,
+        activity: entry?.activity ?? '',
+        taskId: entry?.taskId ?? null,
+        lastSeen: entry?.lastSeen ?? null,
+      };
+    })
+    .sort((a, b) => rank[a.status] - rank[b.status] || a.name.localeCompare(b.name));
+}
+
+export function broadcast(roomId: string, payload: Record<string, unknown>): void {
+  const body = JSON.stringify({ roomId, ...payload });
+  for (const client of clients.values()) {
+    if (client.rooms.has(roomId) && client.ws.readyState === WebSocket.OPEN) {
+      client.ws.send(body);
+    }
+  }
+}
+
+export function broadcastPresence(roomId: string): void {
+  broadcast(roomId, { type: 'presence.update', presence: presenceList(roomId) });
+}
+
+export function broadcastMembers(roomId: string): void {
+  broadcast(roomId, { type: 'members.updated', members: store.listMembers(roomId) });
+  broadcastPresence(roomId);
+}
+
+/* Pending requests are admin-only, so this does not use the room-wide broadcast. */
+export function broadcastJoinRequests(roomId: string): void {
+  const requests = store.listPendingJoinRequests(roomId);
+  const body = JSON.stringify({ roomId, type: 'join.requests.updated', requests });
+  for (const client of clients.values()) {
+    if (!client.rooms.has(roomId) || client.ws.readyState !== WebSocket.OPEN) continue;
+    if (store.getMembership(roomId, client.principal)?.role === 'admin') {
+      client.ws.send(body);
+    }
+  }
+}
+
+export function buildRoomState(roomId: string, principal: Principal): RoomState | null {
+  const membership = store.getMembership(roomId, principal);
+  const room = store.getRoom(roomId);
+  if (!membership || !room) return null;
+
+  return {
+    room,
+    me: { type: principal.type, id: principal.id, name: principal.name, role: membership.role },
+    members: store.listMembers(roomId),
+    repos: store.listRepos(roomId),
+    tasks: store.listTasks(roomId),
+    activity: store.listActivity(roomId, 80),
+    messages: store.listMessages(roomId, undefined, 80),
+    presence: presenceList(roomId),
+    ...(membership.role === 'admin'
+      ? { joinRequests: store.listPendingJoinRequests(roomId) }
+      : {}),
+  };
+}
+
+export function setPresence(
+  roomId: string,
+  principal: Principal,
+  input: { status?: string; activity?: string; taskId?: string | null },
+): PresenceEntry[] | null {
+  const membership = store.getMembership(roomId, principal);
+  if (!membership) return null;
+
+  const entry = ensurePresence(roomId, principal);
+  if (input.status !== undefined) {
+    if (!PRESENCE_STATUSES.has(input.status as PresenceStatus) || input.status === 'offline') {
+      throw new Error('Invalid presence status');
+    }
+    entry.status = input.status as PresenceStatus;
+  }
+  if (input.activity !== undefined) {
+    entry.activity = String(input.activity).slice(0, 160);
+  }
+  if (input.taskId !== undefined) {
+    if (input.taskId && !store.getTask(roomId, input.taskId)) {
+      throw new Error('Task does not belong to this room');
+    }
+    entry.taskId = input.taskId;
+  }
+  entry.lastSeen = nowIso();
+  broadcastPresence(roomId);
+  return presenceList(roomId);
+}
+
+export function evictFromRoom(roomId: string, type: string, id: string): void {
+  presence.get(roomId)?.delete(principalKey(type, id));
+  for (const client of clients.values()) {
+    if (client.rooms.has(roomId) && client.principal.type === type && client.principal.id === id) {
+      client.rooms.delete(roomId);
+      send(client.ws, { type: 'removed', roomId });
+    }
+  }
+  broadcastPresence(roomId);
+}
+
+function markOfflineIfGone(roomId: string, principal: Principal): void {
+  const stillConnected = [...clients.values()].some(
+    (client) =>
+      client.rooms.has(roomId) &&
+      client.principal.type === principal.type &&
+      client.principal.id === principal.id,
+  );
+  if (stillConnected) return;
+
+  const entry = presenceEntry(roomId, principal.type, principal.id);
+  if (entry) {
+    entry.status = 'offline';
+    entry.lastSeen = nowIso();
+  }
+  broadcastPresence(roomId);
+}
+
+function handleJoin(client: Client, roomId: string): void {
+  const membership = store.getMembership(roomId, client.principal);
+  if (!membership) {
+    send(client.ws, { type: 'error', message: 'You are not a member of that room.' });
+    return;
+  }
+  client.rooms.add(roomId);
+  ensurePresence(roomId, client.principal);
+  const state = buildRoomState(roomId, client.principal);
+  if (state) send(client.ws, { type: 'room.state', roomId, state });
+  broadcastPresence(roomId);
+}
+
+function handleLeave(client: Client, roomId: string): void {
+  if (!client.rooms.has(roomId)) return;
+  client.rooms.delete(roomId);
+  markOfflineIfGone(roomId, client.principal);
+}
+
+function roomIdFor(client: Client, payload: Record<string, unknown>): string {
+  const explicit = String(payload.roomId ?? '');
+  if (explicit) return explicit;
+  if (client.principal.type === 'agent') return store.getAgentRoom(client.principal.id) ?? '';
+  return '';
+}
+
+function handleMessageSend(client: Client, payload: Record<string, unknown>): void {
+  const roomId = roomIdFor(client, payload);
+  const membership = store.getMembership(roomId, client.principal);
+  if (!membership) return;
+  if (membership.role === 'viewer') {
+    send(client.ws, { type: 'error', message: 'Viewers cannot post messages.' });
+    return;
+  }
+  const content = String(payload.content ?? '').trim();
+  if (!content) return;
+  if (content.length > 4000) {
+    send(client.ws, { type: 'error', message: 'Messages are limited to 4000 characters.' });
+    return;
+  }
+  const kind = MESSAGE_KINDS.has(payload.kind as MessageKind) ? (payload.kind as MessageKind) : 'chat';
+  const message = store.insertMessage(roomId, client.principal, membership.role, kind, content);
+  broadcast(roomId, { type: 'message.new', message });
+
+  if (kind !== 'chat') {
+    const label = kind === 'instruction' ? 'instruction' : 'suggestion';
+    const activity = store.logActivity(
+      roomId,
+      client.principal,
+      kind,
+      `${client.principal.name} shared ${kind === 'instruction' ? 'an' : 'a'} ${label}: “${truncate(content)}”`,
+      { messageId: message.id },
+    );
+    broadcast(roomId, { type: 'activity.new', activity });
+  }
+}
+
+function handlePresenceSet(client: Client, payload: Record<string, unknown>): void {
+  const roomId = roomIdFor(client, payload);
+  const membership = store.getMembership(roomId, client.principal);
+  if (!membership) return;
+  try {
+    setPresence(roomId, client.principal, {
+      status: payload.status === undefined ? undefined : String(payload.status),
+      activity: payload.activity === undefined ? undefined : String(payload.activity),
+      taskId:
+        payload.taskId === undefined
+          ? undefined
+          : payload.taskId === null
+            ? null
+            : String(payload.taskId),
+    });
+  } catch {
+    send(client.ws, { type: 'error', message: 'Could not update presence.' });
+  }
+}
+
+function handleClientMessage(client: Client, raw: RawData): void {
+  let payload: Record<string, unknown>;
+  try {
+    payload = JSON.parse(raw.toString()) as Record<string, unknown>;
+  } catch {
+    return;
+  }
+
+  switch (payload.type) {
+    case 'room.join':
+      handleJoin(client, String(payload.roomId ?? ''));
+      break;
+    case 'room.leave':
+      handleLeave(client, String(payload.roomId ?? ''));
+      break;
+    case 'message.send':
+      handleMessageSend(client, payload);
+      break;
+    case 'presence.set':
+      handlePresenceSet(client, payload);
+      break;
+    case 'ping':
+      send(client.ws, { type: 'pong' });
+      break;
+    default:
+      break;
+  }
+}
+
+function registerClient(ws: WebSocket, principal: Principal): Client {
+  const client: Client = { ws, principal, rooms: new Set(), alive: true };
+  clients.set(ws, client);
+  send(ws, { type: 'ready', principal: { type: principal.type, id: principal.id, name: principal.name } });
+
+  const agentRoomId = principal.type === 'agent' ? store.getAgentRoom(principal.id) : undefined;
+  if (agentRoomId) handleJoin(client, agentRoomId);
+  return client;
+}
+
+/* An agent can wait on ws?join=<request key> before it has a token. The socket
+ * stays in pendingClients until an admin approves the request. */
+function attachPendingJoin(ws: WebSocket, requestKey: string): void {
+  const request = store.getJoinRequestByKey(requestKey);
+  if (!request) {
+    ws.close(4001, 'unknown join request');
+    return;
+  }
+  const room = store.getRoom(request.room_id);
+  if (!room) {
+    ws.close(4001, 'unknown join request');
+    return;
+  }
+
+  if (request.status === 'denied') {
+    send(ws, { type: 'join.denied', message: 'An admin declined this join request.' });
+    setTimeout(() => ws.close(4003, 'denied'), 100);
+    return;
+  }
+
+  if (request.status === 'approved') {
+    const principal = request.agent_token ? resolveToken(request.agent_token) : null;
+    if (!principal) {
+      ws.close(4001, 'join request is no longer active');
+      return;
+    }
+    registerClient(ws, principal);
+    return;
+  }
+
+  pendingClients.set(ws, { ws, requestId: request.id, roomId: request.room_id, alive: true });
+  send(ws, {
+    type: 'join.pending',
+    message: 'Request received. Keep this socket open; an admin must approve it.',
+    room: { code: room.code, name: room.name, topic: room.topic, mode: room.mode },
+    request: { name: request.name, status: request.status, createdAt: request.created_at },
+  });
+}
+
+/* Called after an admin approves an agent request. Sockets already waiting on
+ * that request receive the credentials and become normal room members. */
+export function promoteJoinRequest(
+  requestId: string,
+  principal: Principal,
+  briefing: Record<string, unknown>,
+): void {
+  for (const [ws, pending] of [...pendingClients]) {
+    if (pending.requestId !== requestId) continue;
+    pendingClients.delete(ws);
+    send(ws, { type: 'join.approved', ...briefing });
+    registerClient(ws, principal);
+  }
+}
+
+export function rejectJoinRequestSocket(requestId: string, message: string): void {
+  for (const [ws, pending] of [...pendingClients]) {
+    if (pending.requestId !== requestId) continue;
+    pendingClients.delete(ws);
+    send(ws, { type: 'join.denied', message });
+    setTimeout(() => ws.close(4003, 'denied'), 100);
+  }
+}
+
+export function attachHub(server: HttpServer): void {
+  const wss = new WebSocketServer({ server, path: '/ws' });
+
+  wss.on('connection', (ws, req) => {
+    const url = new URL(req.url ?? '/ws', 'http://localhost');
+    const principal = resolveToken(url.searchParams.get('token') ?? '');
+    const joinKey = url.searchParams.get('join') ?? '';
+
+    if (principal) {
+      registerClient(ws, principal);
+    } else if (joinKey) {
+      attachPendingJoin(ws, joinKey);
+    } else {
+      ws.close(4001, 'unauthorized');
+      return;
+    }
+
+    ws.on('message', (raw) => {
+      const client = clients.get(ws);
+      if (client) {
+        handleClientMessage(client, raw);
+        return;
+      }
+      if (!pendingClients.has(ws)) return;
+      try {
+        const payload = JSON.parse(raw.toString()) as Record<string, unknown>;
+        if (payload.type === 'ping') send(ws, { type: 'pong' });
+      } catch {
+        // ignore malformed frames from pending sockets
+      }
+    });
+
+    ws.on('pong', () => {
+      const client = clients.get(ws);
+      if (client) client.alive = true;
+      const pending = pendingClients.get(ws);
+      if (pending) pending.alive = true;
+    });
+
+    ws.on('close', () => {
+      pendingClients.delete(ws);
+      const client = clients.get(ws);
+      if (!client) return;
+      clients.delete(ws);
+      for (const roomId of client.rooms) {
+        markOfflineIfGone(roomId, client.principal);
+      }
+    });
+
+    ws.on('error', () => {
+      // close handler takes care of cleanup
+    });
+  });
+
+  /* Idle sockets through proxies or cloud firewalls often get dropped silently.
+   * Ping every 30s and terminate clients that missed the previous ping. */
+  const heartbeat = setInterval(() => {
+    for (const client of clients.values()) {
+      if (!client.alive) {
+        client.ws.terminate();
+        continue;
+      }
+      client.alive = false;
+      client.ws.ping();
+    }
+    for (const pending of pendingClients.values()) {
+      if (!pending.alive) {
+        pending.ws.terminate();
+        continue;
+      }
+      pending.alive = false;
+      pending.ws.ping();
+    }
+  }, 30_000);
+  heartbeat.unref();
+  wss.on('close', () => clearInterval(heartbeat));
+}
+
+export function memberName(roomId: string, type: string, id: string): string | null {
+  const member: Member | undefined = store
+    .listMembers(roomId)
+    .find((candidate) => candidate.type === type && candidate.id === id);
+  return member?.name ?? null;
+}
+
+export const taskStatusLabel = (status: string): string => STATUS_LABEL[status] ?? status;
