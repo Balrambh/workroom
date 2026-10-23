@@ -160,40 +160,6 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
 
   return (
     <div className="panel-scroll">
-      {state.room.code ? (
-        <section className="invite-block">
-          <div className="invite-main">
-            <span className="section-label">Room link</span>
-            <span className="invite-code">{state.room.code}</span>
-          </div>
-          <p className="invite-hint">
-            Share this link. Anyone can preview the room; {isAdmin ? 'you approve' : 'an admin approves'} who joins.
-          </p>
-          <div className="invite-link-row">
-            <code>{roomUrl}</code>
-            <button
-              type="button"
-              className="btn btn-ghost btn-small"
-              onClick={() => actions.copy(roomUrl, 'Room link')}
-            >
-              <CopyIcon size={13} /> Copy link
-            </button>
-          </div>
-          <div className="room-id-row">
-            <span>Room ID</span>
-            <code>{state.room.id.slice(0, 8)}…</code>
-            <button
-              type="button"
-              className="icon-btn"
-              title="Copy full room ID (for agent scripts)"
-              onClick={() => actions.copy(state.room.id, 'Room ID')}
-            >
-              <CopyIcon size={13} />
-            </button>
-          </div>
-        </section>
-      ) : null}
-
       {isAdmin && pendingRequests.length > 0 ? (
         <section className="requests-block">
           <div className="panel-heading">
@@ -254,6 +220,40 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
               </div>
             </div>
           ))}
+        </section>
+      ) : null}
+
+      {state.room.code ? (
+        <section className="invite-block">
+          <div className="invite-main">
+            <span className="section-label">Room link</span>
+            <span className="invite-code">{state.room.code}</span>
+          </div>
+          <p className="invite-hint">
+            Share this link. Anyone can preview the room; {isAdmin ? 'you approve' : 'an admin approves'} who joins.
+          </p>
+          <div className="invite-link-row">
+            <code>{roomUrl}</code>
+            <button
+              type="button"
+              className="btn btn-ghost btn-small"
+              onClick={() => actions.copy(roomUrl, 'Room link')}
+            >
+              <CopyIcon size={13} /> Copy link
+            </button>
+          </div>
+          <div className="room-id-row">
+            <span>Room ID</span>
+            <code>{state.room.id.slice(0, 8)}…</code>
+            <button
+              type="button"
+              className="icon-btn"
+              title="Copy full room ID (for agent scripts)"
+              onClick={() => actions.copy(state.room.id, 'Room ID')}
+            >
+              <CopyIcon size={13} />
+            </button>
+          </div>
         </section>
       ) : null}
 

@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { RoomActions, RoomState } from '../lib/types';
 import { ChatPanel } from './ChatPanel';
 import { RightPanel } from './RightPanel';
-import { ActivityIcon, BranchIcon, CopyIcon, HashIcon, MenuIcon, XIcon } from './Icons';
+import type { PanelTab } from './RightPanel';
+import { ActivityIcon, BranchIcon, CopyIcon, HashIcon, MenuIcon, UsersIcon, XIcon } from './Icons';
 
 interface RoomViewProps {
   state: RoomState;
@@ -15,10 +16,22 @@ interface RoomViewProps {
 export function RoomView({ state, actions, connected, navOpen, onOpenNav }: RoomViewProps) {
   const isCode = state.room.mode === 'code';
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [panelTab, setPanelTab] = useState<PanelTab>('live');
+  const pendingRequests = state.me.role === 'admin' ? state.joinRequests ?? [] : [];
+  const pendingCount = pendingRequests.length;
+  const [alertDismissed, setAlertDismissed] = useState(false);
+  const previousPending = useRef(pendingCount);
+  const requestNames = pendingRequests.slice(0, 2).map((request) => request.name).join(', ');
+  const extraRequests = pendingCount > 2 ? ` +${pendingCount - 2}` : '';
 
   useEffect(() => {
     setDetailsOpen(false);
   }, [state.room.id]);
+
+  useEffect(() => {
+    if (pendingCount > previousPending.current) setAlertDismissed(false);
+    previousPending.current = pendingCount;
+  }, [pendingCount]);
 
   useEffect(() => {
     if (!detailsOpen) return;
@@ -28,6 +41,11 @@ export function RoomView({ state, actions, connected, navOpen, onOpenNav }: Room
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [detailsOpen]);
+
+  function reviewRequests() {
+    setPanelTab('people');
+    setDetailsOpen(true);
+  }
 
   return (
     <div className="room">
@@ -69,13 +87,18 @@ export function RoomView({ state, actions, connected, navOpen, onOpenNav }: Room
           <button
             type="button"
             className="btn btn-ghost btn-small room-info-btn"
-            aria-label="Open room details"
+            aria-label={
+              pendingCount > 0
+                ? `Open room details, ${pendingCount} join request${pendingCount === 1 ? '' : 's'} waiting`
+                : 'Open room details'
+            }
             aria-expanded={detailsOpen}
             aria-controls="room-details-panel"
             onClick={() => setDetailsOpen(true)}
           >
             <ActivityIcon size={14} />
             <span>Room info</span>
+            {pendingCount > 0 ? <span className="info-alert-dot" aria-hidden="true" /> : null}
           </button>
           <span className={`live-badge ${connected ? 'on' : 'off'}`}>
             <span className="live-dot" />
@@ -83,6 +106,34 @@ export function RoomView({ state, actions, connected, navOpen, onOpenNav }: Room
           </span>
         </div>
       </header>
+
+      {pendingCount > 0 && !alertDismissed ? (
+        <div className="join-alert" role="status" aria-live="polite">
+          <span className="join-alert-icon">
+            <UsersIcon size={15} />
+          </span>
+          <div className="join-alert-text">
+            <strong>
+              {pendingCount === 1 ? '1 join request waiting' : `${pendingCount} join requests waiting`}
+            </strong>
+            <span>
+              {requestNames}
+              {extraRequests} · approve or decline in People
+            </span>
+          </div>
+          <button type="button" className="btn btn-alert btn-tiny" onClick={reviewRequests}>
+            Review
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Dismiss join request alert"
+            onClick={() => setAlertDismissed(true)}
+          >
+            <XIcon size={14} />
+          </button>
+        </div>
+      ) : null}
 
       {detailsOpen ? (
         <button
@@ -94,7 +145,7 @@ export function RoomView({ state, actions, connected, navOpen, onOpenNav }: Room
       ) : null}
 
       <div className="room-body">
-        <ChatPanel state={state} actions={actions} />
+        <ChatPanel state={state} actions={actions} key={state.room.id} />
         <div
           className={`room-aside ${detailsOpen ? 'open' : ''}`}
           id="room-details-panel"
@@ -110,7 +161,12 @@ export function RoomView({ state, actions, connected, navOpen, onOpenNav }: Room
               <XIcon size={16} />
             </button>
           </div>
-          <RightPanel state={state} actions={actions} />
+          <RightPanel
+            state={state}
+            actions={actions}
+            tab={panelTab}
+            onTabChange={setPanelTab}
+          />
         </div>
       </div>
     </div>

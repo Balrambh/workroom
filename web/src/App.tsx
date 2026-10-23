@@ -633,6 +633,7 @@ export default function App({ initialCode }: AppProps = {}) {
         ) : null}
         {roomState ? (
           <RoomView
+            key={roomState.room.id}
             state={roomState}
             actions={actions}
             connected={connected}
