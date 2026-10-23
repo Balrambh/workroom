@@ -8,6 +8,7 @@ import type {
   PresenceStatus,
   Repo,
   Role,
+  PublicRoom,
   RoomMode,
   RoomPreview,
   RoomState,
@@ -74,6 +75,10 @@ export const api = {
 
   rooms(): Promise<{ rooms: RoomSummary[] }> {
     return request('/rooms');
+  },
+
+  publicRooms(): Promise<{ rooms: PublicRoom[] }> {
+    return request('/rooms/public');
   },
 
   createRoom(input: { name: string; topic: string; mode: RoomMode }): Promise<{ room: RoomSummary }> {

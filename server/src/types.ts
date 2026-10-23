@@ -39,6 +39,8 @@ export interface RoomSummary {
   mode: RoomMode;
   role: Role;
   memberCount: number;
+  code?: string;
+  createdAt?: string;
 }
 
 export interface Repo {

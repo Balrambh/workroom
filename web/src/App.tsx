@@ -27,7 +27,11 @@ import { RoomView } from './components/RoomView';
 import { Modal } from './components/Modal';
 import { BranchIcon, HashIcon, PlusIcon } from './components/Icons';
 
-function roomFromHash(): string | null {
+function roomTarget(): string | null {
+  const pathMatch = window.location.pathname.match(/^\/rooms?\/([A-Za-z0-9]+)/i);
+  if (pathMatch && pathMatch[1].toLowerCase() !== 'public' && pathMatch[1].toLowerCase() !== 'all') {
+    return pathMatch[1];
+  }
   const match = window.location.hash.match(/room=([^&]+)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
@@ -37,7 +41,11 @@ function appendById<T extends { id: string }>(items: T[], next: T): T[] {
   return [...items, next];
 }
 
-export default function App() {
+interface AppProps {
+  initialCode?: string;
+}
+
+export default function App({ initialCode }: AppProps = {}) {
   const [session, setSession] = useState<Session | null>(readSession);
   const [rooms, setRooms] = useState<RoomSummary[]>([]);
   const [roomsLoaded, setRoomsLoaded] = useState(false);
@@ -62,7 +70,7 @@ export default function App() {
   const activeIdRef = useRef<string | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialSelected = useRef(false);
-  const initialHash = useRef<string | null>(roomFromHash());
+  const initialTarget = useRef<string | null>(initialCode ?? roomTarget());
 
   useEffect(() => {
     activeIdRef.current = activeId;
@@ -92,7 +100,7 @@ export default function App() {
     setAuthToken(next.token);
     saveSession(next);
     initialSelected.current = false;
-    initialHash.current = roomFromHash();
+    initialTarget.current = roomTarget();
     setSession(next);
     setRooms([]);
     setRoomsLoaded(false);
@@ -146,19 +154,47 @@ export default function App() {
     if (!session || !roomsLoaded) return;
     if (rooms.length === 0 || initialSelected.current) return;
     initialSelected.current = true;
-    const preferred = initialHash.current;
-    if (preferred && rooms.some((room) => room.id === preferred)) {
-      setActiveId(preferred);
-    } else {
-      setActiveId(rooms[0].id);
+    const preferred = initialTarget.current;
+    if (preferred) {
+      const match = rooms.find(
+        (room) =>
+          (room.code && room.code.toLowerCase() === preferred.toLowerCase()) ||
+          room.id === preferred,
+      );
+      if (match) {
+        setActiveId(match.id);
+        return;
+      }
     }
+    setActiveId(rooms[0].id);
   }, [rooms, roomsLoaded, session]);
 
   useEffect(() => {
-    if (activeId) {
-      window.history.replaceState(null, '', `#room=${activeId}`);
+    if (activeId && rooms.length > 0) {
+      const activeRoom = rooms.find((room) => room.id === activeId);
+      const targetUrl = activeRoom?.code ? `/room/${activeRoom.code}` : `/room/${activeId}`;
+      if (window.location.pathname !== targetUrl || window.location.hash) {
+        window.history.replaceState(null, '', targetUrl);
+      }
     }
-  }, [activeId]);
+  }, [activeId, rooms]);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      const target = roomTarget();
+      if (!target || !rooms.length) return;
+      const match = rooms.find(
+        (room) =>
+          (room.code && room.code.toLowerCase() === target.toLowerCase()) ||
+          room.id === target,
+      );
+      if (match && match.id !== activeIdRef.current) {
+        setActiveId(match.id);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [rooms]);
 
   useEffect(() => {
     if (!session) return;

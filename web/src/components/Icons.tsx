@@ -126,3 +126,11 @@ export const CodeIcon = (props: IconProps) => (
     <path d="m8 8-4 4 4 4M16 8l4 4-4 4M13.5 5l-3 14" />
   </Icon>
 );
+
+export const SearchIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <circle cx="11" cy="11" r="7" />
+    <path d="m20 20-3.5-3.5" />
+  </Icon>
+);
+

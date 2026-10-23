@@ -21,7 +21,7 @@ import type {
 type Row = Record<string, any>;
 
 const nowIso = () => new Date().toISOString();
-const CODE_ALPHABET = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+const CODE_ALPHABET = 'abcdefghijklmnopqrstuvwxyz0123456789';
 
 function newRoomCode(): string {
   let out = '';
@@ -87,13 +87,14 @@ export function getRoom(roomId: string): Room | undefined {
 }
 
 export function getRoomByCode(code: string): Room | undefined {
-  const row = db.prepare('SELECT * FROM rooms WHERE code = ?').get(code) as Row | undefined;
+  const clean = code.trim();
+  const row = db.prepare('SELECT * FROM rooms WHERE code = ? COLLATE NOCASE').get(clean) as Row | undefined;
   return row ? mapRoom(row) : undefined;
 }
 
 export function createRoom(name: string, topic: string, mode: RoomMode, creator: Principal): Room {
   let code = newRoomCode();
-  while (db.prepare('SELECT 1 FROM rooms WHERE code = ?').get(code)) {
+  while (db.prepare('SELECT 1 FROM rooms WHERE code = ? COLLATE NOCASE').get(code)) {
     code = newRoomCode();
   }
   const id = randomUUID();
@@ -108,7 +109,7 @@ export function createRoom(name: string, topic: string, mode: RoomMode, creator:
 export function listRoomsFor(principal: Principal): RoomSummary[] {
   const rows = db
     .prepare(
-      `SELECT r.id, r.name, r.topic, r.mode, rm.role,
+      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, rm.role,
               (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count
        FROM room_members rm
        JOIN rooms r ON r.id = rm.room_id
@@ -123,7 +124,31 @@ export function listRoomsFor(principal: Principal): RoomSummary[] {
     topic: row.topic,
     mode: row.mode as RoomMode,
     role: row.role as Role,
+    code: row.code,
     memberCount: Number(row.member_count),
+    createdAt: row.created_at,
+  }));
+}
+
+export function listPublicRooms(): (RoomSummary & { code: string; createdAt: string })[] {
+  const rows = db
+    .prepare(
+      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at,
+              (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count
+       FROM rooms r
+       ORDER BY r.created_at DESC`,
+    )
+    .all() as Row[];
+
+  return rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    topic: row.topic,
+    mode: row.mode as RoomMode,
+    role: 'viewer' as Role,
+    code: row.code,
+    memberCount: Number(row.member_count),
+    createdAt: row.created_at,
   }));
 }
 

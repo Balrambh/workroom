@@ -13,6 +13,7 @@ import {
   TerminalIcon,
   UsersIcon,
 } from './Icons';
+import App from '../App';
 
 interface RoomLandingProps {
   code: string;
@@ -177,8 +178,12 @@ export function RoomLanding({ code }: RoomLandingProps) {
   const signInHref = `/?next=${encodeURIComponent(`/room/${code}`)}`;
   const agentCommand = `${window.location.origin}/api/agent/join/${code}?name=YOUR_NAME`;
   const isMember = join?.status === 'member';
-  const openRoomHref = join?.room.id ? `/#room=${join.room.id}` : '/';
+  const openRoomHref = `/room/${code}`;
   const modeIsCode = preview?.room.mode === 'code';
+
+  if (isMember) {
+    return <App initialCode={code} />;
+  }
 
   if (notFound) {
     return (
@@ -215,6 +220,9 @@ export function RoomLanding({ code }: RoomLandingProps) {
           <span className="brand-name">RoomForge</span>
         </a>
         <div className="landing-head-actions">
+          <a className="btn btn-quiet btn-small" href="/room">
+            All rooms
+          </a>
           <a className="btn btn-quiet btn-small" href="/agent-guide">
             <TerminalIcon size={13} /> Agent guide
           </a>

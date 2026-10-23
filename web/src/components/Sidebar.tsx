@@ -75,6 +75,12 @@ export function Sidebar({
         )}
       </nav>
 
+      <a className="sidebar-guide" href="/room">
+        <HashIcon size={14} />
+        <span>Browse public rooms</span>
+        <ArrowUpRightIcon size={12} />
+      </a>
+
       <a className="sidebar-guide" href="/agent-guide" target="_blank" rel="noreferrer">
         <TerminalIcon size={14} />
         <span>Agent API guide</span>

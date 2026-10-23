@@ -1,0 +1,2755 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RoomForge — Complete Call Flow &amp; Architecture Documentation</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<style>
+:root {
+  --bg: #0f172a; --surface: #1e293b; --border: #334155;
+  --text: #e2e8f0; --muted: #94a3b8; --accent: #38bdf8;
+  --warn: #fbbf24; --err: #f87171; --ok: #34d399;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { font-family: 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.7; }
+.container { max-width: 1200px; margin: 0 auto; padding: 40px 24px; }
+h1 { font-size: 2.4rem; margin-bottom: 8px; background: linear-gradient(135deg, var(--accent), #a78bfa); -webkit-background-clip: text; -webkit-text-fill-color: transparent; }
+h2 { font-size: 1.7rem; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 2px solid var(--accent); }
+h3 { font-size: 1.25rem; margin: 32px 0 12px; color: var(--accent); }
+h4 { font-size: 1.05rem; margin: 20px 0 8px; color: var(--warn); }
+p { margin: 8px 0; color: var(--muted); }
+.subtitle { color: var(--muted); font-size: 1.1rem; margin-bottom: 32px; }
+.mermaid { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 24px; margin: 20px 0; overflow-x: auto; position: relative; }
+.mermaid.is-enhanced { padding: 0; overflow: hidden; min-height: 260px; }
+.mermaid-viewport { padding: 54px 24px 24px; overflow: hidden; cursor: grab; touch-action: none; min-height: 260px; }
+.mermaid-viewport.is-dragging { cursor: grabbing; }
+.mermaid-viewport svg { max-width: none !important; height: auto; transform-origin: 0 0; transition: transform 120ms ease; }
+.mermaid-toolbar { position: absolute; top: 10px; right: 10px; z-index: 3; display: flex; align-items: center; gap: 6px; padding: 6px; background: rgba(15,23,42,0.92); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,0.28); }
+.mermaid-toolbar button, .mermaid-toolbar .zoom-level { height: 28px; min-width: 32px; border: 1px solid var(--border); border-radius: 6px; background: #1e293b; color: var(--text); font: 600 0.78rem system-ui, sans-serif; display: inline-flex; align-items: center; justify-content: center; }
+.mermaid-toolbar button { cursor: pointer; }
+.mermaid-toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+.mermaid-toolbar .zoom-level { min-width: 52px; color: var(--muted); background: transparent; }
+.call-table { width: 100%; border-collapse: collapse; margin: 16px 0; font-size: 0.92rem; }
+.call-table th { background: #1a2744; color: var(--accent); text-align: left; padding: 10px 14px; border: 1px solid var(--border); }
+.call-table td { padding: 8px 14px; border: 1px solid var(--border); vertical-align: top; }
+.call-table tr:nth-child(even) { background: rgba(255,255,255,0.02); }
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: 600; }
+.tag-async { background: #7c3aed33; color: #a78bfa; }
+.tag-class { background: #05966933; color: var(--ok); }
+.tag-func { background: #2563eb33; color: var(--accent); }
+.tag-cmd { background: #d9770633; color: var(--warn); }
+.tag-endpoint { background: #dc262633; color: var(--err); }
+.tag-hook { background: #db277733; color: #f472b6; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; margin: 16px 0; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); gap: 16px; margin: 16px 0; }
+.arrow-chain { font-family: 'Fira Code', monospace; font-size: 0.85rem; color: var(--accent); padding: 10px; background: rgba(56,189,248,0.06); border-radius: 6px; }
+code { font-family: 'Fira Code', 'Cascadia Code', monospace; background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 3px; font-size: 0.88em; }
+ul, ol { margin: 8px 0 8px 24px; color: var(--muted); }
+li { margin: 4px 0; }
+a { color: var(--accent); }
+hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+.nav { position: sticky; top: 0; background: var(--bg); z-index: 10; padding: 12px 0; border-bottom: 1px solid var(--border); display: flex; gap: 20px; flex-wrap: wrap; font-size: 0.9rem; }
+.nav a { text-decoration: none; }
+.nav a:hover { text-decoration: underline; }
+@media (max-width: 768px) { .container { padding: 16px; } h1 { font-size: 1.8rem; } }
+
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>RoomForge — Complete Call Flow &amp; Architecture Documentation</h1>
+<p class="subtitle">Generated from graphify knowledge graph: 454 nodes, 1016 edges, 12 communities. Commit: 24ace81</p>
+
+<div class="nav">
+    <a href="#overview">Architecture Overview</a>
+    <a href="#build-graph">Graph Build</a>
+    <a href="#cli-skills">CLI &amp; Skill Installers</a>
+    <a href="#serve-api">Serving API</a>
+    <a href="#web-components-iconstsx">Web Components Iconstsx</a>
+    <a href="#server-storets-typests">Server Storets Typests</a>
+    <a href="#server-hubts-typests">Server Hubts Typests</a>
+    <a href="#web-typests-components">Web Typests Components</a>
+</div>
+
+<!-- ====== Architecture Overview ====== -->
+<h2 id="overview">1. Architecture Overview</h2>
+
+<div class="mermaid">
+
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    BUILD_GRAPH_321CBB04("Graph Build<br/><small>157 nodes</small>")
+    class BUILD_GRAPH_321CBB04 module;
+    CLI_SKILLS_9964CBB8("CLI &amp; Skill Installers<br/><small>25 nodes</small>")
+    class CLI_SKILLS_9964CBB8 module;
+    SERVE_API_35EC8E86("Serving API<br/><small>59 nodes</small>")
+    class SERVE_API_35EC8E86 module;
+    WEB_COMPONENTS_ICONSTSX_F2A6BA4E("Web Components Iconstsx<br/><small>71 nodes</small>")
+    class WEB_COMPONENTS_ICONSTSX_F2A6BA4E module;
+    SERVER_STORETS_TYPESTS_9054AA3C("Server Storets Typests<br/><small>60 nodes</small>")
+    class SERVER_STORETS_TYPESTS_9054AA3C module;
+    SERVER_HUBTS_TYPESTS_CE9FB17D("Server Hubts Typests<br/><small>46 nodes</small>")
+    class SERVER_HUBTS_TYPESTS_CE9FB17D module;
+    WEB_TYPESTS_COMPONENTS_41D88850("Web Typests Components<br/><small>36 nodes</small>")
+    class WEB_TYPESTS_COMPONENTS_41D88850 module;
+    SERVE_API_35EC8E86 -->|imports x50| WEB_COMPONENTS_ICONSTSX_F2A6BA4E
+    WEB_COMPONENTS_ICONSTSX_F2A6BA4E -->|imports x27| WEB_TYPESTS_COMPONENTS_41D88850
+    WEB_COMPONENTS_ICONSTSX_F2A6BA4E -->|imports x23| SERVE_API_35EC8E86
+    WEB_TYPESTS_COMPONENTS_41D88850 -->|calls x13| WEB_COMPONENTS_ICONSTSX_F2A6BA4E
+    BUILD_GRAPH_321CBB04 -->|imports x12| SERVER_HUBTS_TYPESTS_CE9FB17D
+    SERVER_HUBTS_TYPESTS_CE9FB17D -->|contains x10| SERVER_STORETS_TYPESTS_9054AA3C
+    SERVER_HUBTS_TYPESTS_CE9FB17D -->|calls x7| BUILD_GRAPH_321CBB04
+    SERVE_API_35EC8E86 -->|contains x7| WEB_TYPESTS_COMPONENTS_41D88850
+    SERVER_STORETS_TYPESTS_9054AA3C -->|imports x5| BUILD_GRAPH_321CBB04
+    SERVER_STORETS_TYPESTS_9054AA3C -->|imports x5| SERVER_HUBTS_TYPESTS_CE9FB17D
+    WEB_TYPESTS_COMPONENTS_41D88850 -->|imports x4| SERVE_API_35EC8E86
+    SERVE_API_35EC8E86 -->|imports| BUILD_GRAPH_321CBB04
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<div class="grid">
+  <div class="card">
+    <h4>Architecture Layers</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>Layer</th><th>Nodes</th><th>Communities</th></tr>
+      <tr><td>Graph Build</td><td>157</td><td><code>3, 6, 8, 9, 10, 11</code></td></tr><tr><td>CLI &amp; Skill Installers</td><td>25</td><td><code>7</code></td></tr><tr><td>Serving API</td><td>59</td><td><code>2</code></td></tr><tr><td>Web Components Iconstsx</td><td>71</td><td><code>0</code></td></tr><tr><td>Server Storets Typests</td><td>60</td><td><code>1</code></td></tr><tr><td>Server Hubts Typests</td><td>46</td><td><code>4</code></td></tr><tr><td>Web Typests Components</td><td>36</td><td><code>5</code></td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Core Flow</h4>
+    <div class="arrow-chain">CLI &amp; Skill Installers -&gt; Graph Build -&gt; Server Hubts Typests -&gt; Server Storets Typests -&gt; Serving API -&gt; Web Components Iconstsx -&gt; Web Typests Components</div>
+  </div>
+</div>
+<div class="grid">
+  <div class="card">
+    <h4>Graph Report Highlights</h4>
+    <ul>
+      <li>454 nodes · 1016 edges · 12 communities</li>
+      <li>Extraction: 99% EXTRACTED · 1% INFERRED · 0% AMBIGUOUS · INFERRED: 9 edges (avg confidence: 0.85)</li>
+      <li>Token cost: 0 input · 0 output</li>
+      <li>1. `RoomActions` - 28 edges</li>
+      <li>2. `App()` - 24 edges</li>
+      <li>3. `BranchIcon()` - 22 edges</li>
+    </ul>
+  </div>
+</div>
+<hr>
+<!-- ====== 2. Graph Build ====== -->
+<h2 id="build-graph">2. Graph Build</h2>
+<p>Graph Build groups implementation around server, packagejson, web, tsconfigjson, mostly in server/package.json, web/package.json, server/src/routes.ts. This section covers 157 nodes and 190 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Graph Build (157 nodes, 190 edges)
+    subgraph build_graph_server_src_routes_ts_ef92f22a["server/src/routes.ts"]
+        server_src_routes_57fe425a("routes.ts")
+        server_src_routes_adminorthrow_cf7a3ee1("adminOrThrow()<br/><small>server/src/routes.ts</small>")
+        server_src_routes_membershiporthrow_7f804851("membershipOrThrow()<br/><small>server/src/routes.ts</small>")
+        server_src_routes_attachrepo_6b7af039("attachRepo()<br/><small>server/src/routes.ts</small>")
+        server_src_routes_roomorthrow_584d276e("roomOrThrow()<br/><small>server/src/routes.ts</small>")
+        server_src_routes_principalof_d93f9fa6("principalOf()<br/><small>server/src/routes.ts</small>")
+        server_src_routes_useronly_0b64e432("userOnly()<br/><small>server/src/routes.ts</small>")
+        server_src_routes_verifyassignee_95ed8c0e("verifyAssignee()<br/><small>server/src/routes.ts</small>")
+    end
+    subgraph build_graph_server_src_auth_ts_630a167d["server/src/auth.ts"]
+        server_src_auth_cf126cf8("auth.ts")
+        server_src_auth_requireauth_52dda76f("requireAuth()<br/><small>server/src/auth.ts</small>")
+        server_src_auth_resolvetoken_23b4d498("resolveToken()<br/><small>server/src/auth.ts</small>")
+        server_src_auth_hashagenttoken_d531454a("hashAgentToken()<br/><small>server/src/auth.ts</small>")
+    end
+    subgraph build_graph_server_src_errors_ts_e001ed9c["server/src/errors.ts"]
+        server_src_errors_httperror_aadb00d3("HttpError<br/><small>server/src/errors.ts</small>")
+        server_src_errors_httperror_constructor_d131baad("constructor()<br/><small>server/src/errors.ts</small>")
+    end
+    server_package_3c8ec87f("server/package.json")
+    server_src_db_a94868f0("db.ts")
+    server_src_index_8f1779a3("index.ts")
+    web_package_88d9f89c("web/package.json")
+    server_src_errors_httperror_aadb00d3 -->|method| server_src_errors_httperror_constructor_d131baad
+    server_src_auth_requireauth_52dda76f -->|calls| server_src_auth_resolvetoken_23b4d498
+    server_src_auth_resolvetoken_23b4d498 -->|calls| server_src_auth_hashagenttoken_d531454a
+    server_src_routes_adminorthrow_cf7a3ee1 -->|calls| server_src_routes_membershiporthrow_7f804851
+    server_src_routes_adminorthrow_cf7a3ee1 -->|calls| server_src_errors_httperror_aadb00d3
+    server_src_routes_attachrepo_6b7af039 -->|calls| server_src_errors_httperror_aadb00d3
+    server_src_routes_attachrepo_6b7af039 -->|calls| server_src_routes_roomorthrow_584d276e
+    server_src_routes_membershiporthrow_7f804851 -->|calls| server_src_errors_httperror_aadb00d3
+    server_src_routes_principalof_d93f9fa6 -->|calls| server_src_errors_httperror_aadb00d3
+    server_src_routes_roomorthrow_584d276e -->|calls| server_src_errors_httperror_aadb00d3
+    server_src_routes_useronly_0b64e432 -->|calls| server_src_errors_httperror_aadb00d3
+    server_src_routes_verifyassignee_95ed8c0e -->|calls| server_src_errors_httperror_aadb00d3
+    server_src_auth_cf126cf8 -->|imports| server_src_db_a94868f0
+    server_src_index_8f1779a3 -->|imports| server_src_errors_httperror_aadb00d3
+    server_src_index_8f1779a3 -->|imports| server_src_routes_57fe425a
+    server_src_routes_57fe425a -->|imports| server_src_errors_httperror_aadb00d3
+    server_src_routes_57fe425a -->|imports| server_src_auth_hashagenttoken_d531454a
+    server_src_routes_57fe425a -->|imports| server_src_auth_resolvetoken_23b4d498
+    server_src_routes_57fe425a -->|imports| server_src_auth_cf126cf8
+    %% Omitted for readability: 139 nodes, 0 edges
+    class server_src_routes_57fe425a api;
+    class server_src_routes_adminorthrow_cf7a3ee1 function;
+    class server_src_routes_membershiporthrow_7f804851 function;
+    class server_src_routes_attachrepo_6b7af039 function;
+    class server_src_routes_roomorthrow_584d276e function;
+    class server_src_routes_principalof_d93f9fa6 function;
+    class server_src_routes_useronly_0b64e432 function;
+    class server_src_routes_verifyassignee_95ed8c0e function;
+    class server_src_auth_cf126cf8 module;
+    class server_src_auth_requireauth_52dda76f function;
+    class server_src_auth_resolvetoken_23b4d498 function;
+    class server_src_auth_hashagenttoken_d531454a function;
+    class server_src_errors_httperror_aadb00d3 klass;
+    class server_src_errors_httperror_constructor_d131baad function;
+    class server_package_3c8ec87f function;
+    class server_src_db_a94868f0 module;
+    class server_src_index_8f1779a3 module;
+    class web_package_88d9f89c function;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>AuthedRequest</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>AuthedRequest node in server/src/auth.ts.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>adminOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>attachRepo()</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>index.ts</code><br><small style="color:var(--muted)">server/src/index.ts</small><br>+7 more</td>
+  <td><code>constructor()</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td>HttpError node in server/src/errors.ts.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>Room</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Room node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>TaskStatus</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>TaskStatus node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>hashAgentToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>resolveToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small><br><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Caches analysis results or computes cache keys.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>hashPassword()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Caches analysis results or computes cache keys.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>newAgentToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>newAgentToken() node in server/src/auth.ts.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>requireAuth()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><code>resolveToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td>requireAuth() node in server/src/auth.ts.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>resolveToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>attachHub()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>attachPendingJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+2 more</td>
+  <td><code>hashAgentToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td>resolveToken() node in server/src/auth.ts.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>signSessionToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>signSessionToken() node in server/src/auth.ts.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>verifyPassword()</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>verifyPassword() node in server/src/auth.ts.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>.constructor()</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.constructor() node in server/src/errors.ts.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>adminOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small><br><code>membershipOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>adminOrThrow() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>agentBriefing()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>agentBriefing() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>attachRepo()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small><br><code>roomOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>attachRepo() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>emitActivity()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>emitActivity() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>emitTasks()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>emitTasks() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>membershipOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>adminOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>writerOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td>membershipOrThrow() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>previewHeaders()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>previewHeaders() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>principalOf()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td>principalOf() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>publicMembers()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>publicMembers() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>publicOrigin()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>publicOrigin() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>publicRoomSummary()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>publicRoomSummary() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>roomOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>attachRepo()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td>roomOrThrow() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>userOnly()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td>userOnly() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>verifyAssignee()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small></td>
+  <td>verifyAssignee() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>writerOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>HttpError</code><br><small style="color:var(--muted)">server/src/errors.ts</small><br><code>membershipOrThrow()</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>writerOrThrow() node in server/src/routes.ts.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>auth.ts</code><br><small style="color:var(--muted)">server/src/auth.ts</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td><code>bcryptjs</code><br><small style="color:var(--muted)">server/package.json</small><br><code>db</code><br><small style="color:var(--muted)">server/src/db.ts</small><br><code>db.ts</code><br><small style="color:var(--muted)">server/src/db.ts</small><br>+5 more</td>
+  <td>Module file in server/src/auth.ts.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>db.ts</code><br><small style="color:var(--muted)">server/src/db.ts</small></td>
+  <td><span class="tag tag-class">Module</span></td>
+  <td><code>auth.ts</code><br><small style="color:var(--muted)">server/src/auth.ts</small><br><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><code>ref_node_fs</code><br><code>ref_node_path</code><br><code>ref_node_sqlite</code><br>+1 more</td>
+  <td>Module file in server/src/db.ts.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>dataDir</code><br><small style="color:var(--muted)">server/src/db.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>dataDir node in server/src/db.ts.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>server/package.json</code></td><td>35 nodes</td></tr>
+<tr><td><code>web/package.json</code></td><td>24 nodes</td></tr>
+<tr><td><code>server/src/routes.ts</code></td><td>22 nodes</td></tr>
+<tr><td><code>web/tsconfig.json</code></td><td>17 nodes</td></tr>
+<tr><td><code>package.json</code></td><td>16 nodes</td></tr>
+<tr><td><code>server/tsconfig.json</code></td><td>12 nodes</td></tr>
+<tr><td><code>server/src/auth.ts</code></td><td>9 nodes</td></tr>
+<tr><td><code>server/src/index.ts</code></td><td>6 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x120, imports x31, imports x24, calls x13. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 3. CLI & Skill Installers ====== -->
+<h2 id="cli-skills">3. CLI &amp; Skill Installers</h2>
+<p>CLI &amp; Skill Installers groups implementation around server, scripts, demo, agentmjs, mostly in server/scripts/demo-agent.mjs, server/scripts/agent-cli.mjs, server/package.json. This section covers 25 nodes and 39 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: CLI &amp; Skill Installers (25 nodes, 39 edges)
+    subgraph cli_skills_server_scripts_agent_cli_mjs_6dcc192a["server/scripts/agent-cli.mjs"]
+        server_scripts_agent_cli_26bb4931("agent-cli.mjs")
+        server_scripts_agent_cli_handleline_1f8f1fea("handleLine()<br/><small>server/scripts/agent-cli.mjs</small>")
+        server_scripts_agent_cli_prompt_4ec9cfa3("prompt()<br/><small>server/scripts/agent-cli.mjs</small>")
+        server_scripts_agent_cli_printpresence_5e90fd3c("printPresence()<br/><small>server/scripts/agent-cli.mjs</small>")
+        server_scripts_agent_cli_argvalue_5ef273f3("argValue()<br/><small>server/scripts/agent-cli.mjs</small>")
+        server_scripts_agent_cli_interactive_16cdb6f3("interactive<br/><small>server/scripts/agent-cli.mjs</small>")
+        server_scripts_agent_cli_presence_eba6657e("presence<br/><small>server/scripts/agent-cli.mjs</small>")
+        server_scripts_agent_cli_queued_47bbb981("queued<br/><small>server/scripts/agent-cli.mjs</small>")
+    end
+    subgraph cli_skills_server_scripts_demo_agent_mjs_7e1f772a["server/scripts/demo-agent.mjs"]
+        server_scripts_demo_agent_maybehandletask_b548ea19("maybeHandleTask()<br/><small>server/scripts/demo-agent.mjs</small>")
+        server_scripts_demo_agent_maybereply_6e3c3d5f("maybeReply()<br/><small>server/scripts/demo-agent.mjs</small>")
+        server_scripts_demo_agent_0f355b81("demo-agent.mjs")
+        server_scripts_demo_agent_patchtask_a5be07e9("patchTask()<br/><small>server/scripts/demo-agent.mjs</small>")
+        server_scripts_demo_agent_log_72e5e387("log()<br/><small>server/scripts/demo-agent.mjs</small>")
+        server_scripts_demo_agent_setpresence_0d20e13d("setPresence()<br/><small>server/scripts/demo-agent.mjs</small>")
+        server_scripts_demo_agent_postmessage_367c2805("postMessage()<br/><small>server/scripts/demo-agent.mjs</small>")
+        server_scripts_demo_agent_send_3e5acc9d("send()<br/><small>server/scripts/demo-agent.mjs</small>")
+    end
+    ref_node_readline_59ebf7a5("ref_node_readline")
+    ref_ws_f8efb308("ws<br/><small>server/package.json</small>")
+    server_scripts_agent_cli_handleline_1f8f1fea -->|calls| server_scripts_agent_cli_prompt_4ec9cfa3
+    server_scripts_agent_cli_handleline_1f8f1fea -->|calls| server_scripts_agent_cli_printpresence_5e90fd3c
+    server_scripts_agent_cli_prompt_4ec9cfa3 -->|calls| server_scripts_agent_cli_prompt_4ec9cfa3
+    server_scripts_demo_agent_log_72e5e387 -->|calls| server_scripts_demo_agent_log_72e5e387
+    server_scripts_demo_agent_maybehandletask_b548ea19 -->|calls| server_scripts_demo_agent_setpresence_0d20e13d
+    server_scripts_demo_agent_maybehandletask_b548ea19 -->|calls| server_scripts_demo_agent_log_72e5e387
+    server_scripts_demo_agent_maybehandletask_b548ea19 -->|calls| server_scripts_demo_agent_patchtask_a5be07e9
+    server_scripts_demo_agent_maybehandletask_b548ea19 -->|calls| server_scripts_demo_agent_postmessage_367c2805
+    server_scripts_demo_agent_maybereply_6e3c3d5f -->|calls| server_scripts_demo_agent_setpresence_0d20e13d
+    server_scripts_demo_agent_maybereply_6e3c3d5f -->|calls| server_scripts_demo_agent_log_72e5e387
+    server_scripts_demo_agent_maybereply_6e3c3d5f -->|calls| server_scripts_demo_agent_postmessage_367c2805
+    server_scripts_demo_agent_patchtask_a5be07e9 -->|calls| server_scripts_demo_agent_log_72e5e387
+    server_scripts_demo_agent_postmessage_367c2805 -->|calls| server_scripts_demo_agent_send_3e5acc9d
+    server_scripts_demo_agent_send_3e5acc9d -->|calls| server_scripts_demo_agent_send_3e5acc9d
+    server_scripts_demo_agent_setpresence_0d20e13d -->|calls| server_scripts_demo_agent_send_3e5acc9d
+    server_scripts_agent_cli_26bb4931 -->|imports| ref_node_readline_59ebf7a5
+    server_scripts_agent_cli_26bb4931 -->|imports| ref_ws_f8efb308
+    server_scripts_demo_agent_0f355b81 -->|imports| ref_ws_f8efb308
+    %% Omitted for readability: 7 nodes, 0 edges
+    class server_scripts_agent_cli_26bb4931 entry;
+    class server_scripts_agent_cli_handleline_1f8f1fea function;
+    class server_scripts_agent_cli_prompt_4ec9cfa3 function;
+    class server_scripts_agent_cli_printpresence_5e90fd3c function;
+    class server_scripts_agent_cli_argvalue_5ef273f3 function;
+    class server_scripts_agent_cli_interactive_16cdb6f3 function;
+    class server_scripts_agent_cli_presence_eba6657e function;
+    class server_scripts_agent_cli_queued_47bbb981 function;
+    class server_scripts_demo_agent_maybehandletask_b548ea19 function;
+    class server_scripts_demo_agent_maybereply_6e3c3d5f function;
+    class server_scripts_demo_agent_0f355b81 function;
+    class server_scripts_demo_agent_patchtask_a5be07e9 function;
+    class server_scripts_demo_agent_log_72e5e387 function;
+    class server_scripts_demo_agent_setpresence_0d20e13d function;
+    class server_scripts_demo_agent_postmessage_367c2805 function;
+    class server_scripts_demo_agent_send_3e5acc9d function;
+    class ref_node_readline_59ebf7a5 function;
+    class ref_ws_f8efb308 function;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>argValue()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>argValue() node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>handleLine()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>printPresence()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small><br><code>prompt()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td>handleLine() node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>printPresence()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleLine()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td>No direct outbound edge</td>
+  <td>printPresence() node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>prompt()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleLine()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small><br><code>prompt()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><code>prompt()</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td>Builds structured prompts for model calls.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>argValue()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>argValue() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>log()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>log()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>maybeHandleTask()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>maybeReply()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br>+1 more</td>
+  <td><code>log()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td>log() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>maybeHandleTask()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>log()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>patchTask()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>postMessage()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br>+1 more</td>
+  <td>maybeHandleTask() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>maybeReply()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>log()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>postMessage()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>setPresence()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td>maybeReply() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>patchTask()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>maybeHandleTask()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><code>log()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td>patchTask() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>postMessage()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>maybeHandleTask()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>maybeReply()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><code>send()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td>postMessage() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>send()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>postMessage()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>send()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>setPresence()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><code>send()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td>send() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>setPresence()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>maybeHandleTask()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>maybeReply()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><code>send()</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td>setPresence() node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>agent-cli.mjs</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>ref_node_readline</code><br><code>ws</code><br><small style="color:var(--muted)">server/package.json</small></td>
+  <td>agent-cli.mjs node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>interactive</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>interactive node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>presence</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>presence node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>queued</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>queued node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>rl</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>rl node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>socket</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>socket node in server/scripts/agent-cli.mjs.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>demo-agent.mjs</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>ws</code><br><small style="color:var(--muted)">server/package.json</small></td>
+  <td>demo-agent.mjs node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>handledTasks</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>handledTasks node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>me</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>me node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>repliedMessages</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>repliedMessages node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>socket</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>socket node in server/scripts/demo-agent.mjs.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>ws</code><br><small style="color:var(--muted)">server/package.json</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>agent-cli.mjs</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small><br><code>demo-agent.mjs</code><br><small style="color:var(--muted)">server/scripts/demo-agent.mjs</small><br><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>ws node in server/package.json.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>ref_node_readline</code><br><small style="color:var(--muted)"></small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>agent-cli.mjs</code><br><small style="color:var(--muted)">server/scripts/agent-cli.mjs</small></td>
+  <td>No direct outbound edge</td>
+  <td>ref_node_readline node in project.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>server/scripts/demo-agent.mjs</code></td><td>13 nodes</td></tr>
+<tr><td><code>server/scripts/agent-cli.mjs</code></td><td>10 nodes</td></tr>
+<tr><td><code>server/package.json</code></td><td>1 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x21, calls x15, imports x3. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 4. Serving API ====== -->
+<h2 id="serve-api">4. Serving API</h2>
+<p>Serving API groups implementation around web, typests, apptsx, components, mostly in src/lib/types.ts, web/src/App.tsx, src/components/RoomLanding.tsx. This section covers 59 nodes and 142 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Serving API (59 nodes, 142 edges)
+    subgraph serve_api_web_src_App_tsx_0264c974["web/src/App.tsx"]
+        web_src_app_2e45519c("App.tsx")
+        web_src_app_app_27cc2f28("App()<br/><small>web/src/App.tsx</small>")
+        web_src_app_appendbyid_bae4ec0c("appendById()<br/><small>web/src/App.tsx</small>")
+        web_src_app_roomtarget_18e97904("roomTarget()<br/><small>web/src/App.tsx</small>")
+        web_src_app_app_copy_8845009b("copy()<br/><small>web/src/App.tsx</small>")
+        web_src_app_app_shownotice_9e792e7b("showNotice()<br/><small>web/src/App.tsx</small>")
+        web_src_app_app_handleauth_ce4c5949("handleAuth()<br/><small>web/src/App.tsx</small>")
+        web_src_app_app_handlelogout_66070d54("handleLogout()<br/><small>web/src/App.tsx</small>")
+    end
+    subgraph serve_api_src_lib_api_ts_4018941b["src/lib/api.ts"]
+        web_src_lib_api_29c7d562("api.ts")
+        web_src_lib_api_apierror_afc29cd5("ApiError<br/><small>src/lib/api.ts</small>")
+        web_src_lib_api_apierror_constructor_afbf3734("constructor()<br/><small>src/lib/api.ts</small>")
+        web_src_lib_api_setauthtoken_2be1b155("setAuthToken()<br/><small>src/lib/api.ts</small>")
+    end
+    subgraph serve_api_src_components_RoomLanding_tsx_903a029b["src/components/RoomLanding.tsx"]
+        web_src_components_roomlanding_124ac76e("RoomLanding.tsx")
+        web_src_components_roomlanding_roomlanding_a7a83737("RoomLanding()<br/><small>src/components/RoomLanding.tsx</small>")
+    end
+    subgraph serve_api_src_lib_session_ts_c1eb14ff["src/lib/session.ts"]
+        web_src_lib_session_savesession_f1e58aae("saveSession()<br/><small>src/lib/session.ts</small>")
+        web_src_lib_session_clearsession_55fdacab("clearSession()<br/><small>src/lib/session.ts</small>")
+    end
+    web_src_components_authscreen_d5cb65e2("AuthScreen.tsx")
+    web_src_main_7a3e5161("main.tsx")
+    web_src_lib_api_apierror_afc29cd5 -->|method| web_src_lib_api_apierror_constructor_afbf3734
+    web_src_app_app_27cc2f28 -->|calls| web_src_lib_session_savesession_f1e58aae
+    web_src_app_app_27cc2f28 -->|calls| web_src_lib_session_clearsession_55fdacab
+    web_src_app_app_27cc2f28 -->|calls| web_src_app_appendbyid_bae4ec0c
+    web_src_app_app_27cc2f28 -->|calls| web_src_app_roomtarget_18e97904
+    web_src_app_app_27cc2f28 -->|calls| web_src_lib_api_setauthtoken_2be1b155
+    web_src_app_app_copy_8845009b -->|calls| web_src_app_app_shownotice_9e792e7b
+    web_src_app_app_handleauth_ce4c5949 -->|calls| web_src_lib_api_setauthtoken_2be1b155
+    web_src_app_app_handleauth_ce4c5949 -->|calls| web_src_lib_session_savesession_f1e58aae
+    web_src_app_app_handleauth_ce4c5949 -->|calls| web_src_app_roomtarget_18e97904
+    web_src_app_app_handlelogout_66070d54 -->|calls| web_src_lib_api_setauthtoken_2be1b155
+    web_src_app_app_handlelogout_66070d54 -->|calls| web_src_lib_session_clearsession_55fdacab
+    web_src_components_roomlanding_roomlanding_a7a83737 -->|calls| web_src_app_app_27cc2f28
+    web_src_components_roomlanding_roomlanding_a7a83737 -->|calls| web_src_lib_api_setauthtoken_2be1b155
+    web_src_components_roomlanding_roomlanding_a7a83737 -->|calls| web_src_lib_session_clearsession_55fdacab
+    web_src_app_2e45519c -->|imports| web_src_lib_api_apierror_afc29cd5
+    web_src_app_2e45519c -->|imports| web_src_lib_api_setauthtoken_2be1b155
+    web_src_app_2e45519c -->|imports| web_src_lib_session_clearsession_55fdacab
+    web_src_app_2e45519c -->|imports| web_src_lib_session_savesession_f1e58aae
+    web_src_app_2e45519c -->|imports| web_src_components_authscreen_d5cb65e2
+    web_src_app_2e45519c -->|imports| web_src_lib_api_29c7d562
+    web_src_components_authscreen_d5cb65e2 -->|imports| web_src_lib_api_29c7d562
+    web_src_components_roomlanding_124ac76e -->|imports| web_src_app_app_27cc2f28
+    web_src_components_roomlanding_124ac76e -->|imports| web_src_lib_api_apierror_afc29cd5
+    %% Omitted for readability: 41 nodes, 8 edges
+    class web_src_app_2e45519c ui;
+    class web_src_app_app_27cc2f28 ui;
+    class web_src_app_appendbyid_bae4ec0c ui;
+    class web_src_app_roomtarget_18e97904 ui;
+    class web_src_app_app_copy_8845009b ui;
+    class web_src_app_app_shownotice_9e792e7b ui;
+    class web_src_app_app_handleauth_ce4c5949 ui;
+    class web_src_app_app_handlelogout_66070d54 ui;
+    class web_src_lib_api_29c7d562 api;
+    class web_src_lib_api_apierror_afc29cd5 api;
+    class web_src_lib_api_apierror_constructor_afbf3734 function;
+    class web_src_lib_api_setauthtoken_2be1b155 function;
+    class web_src_components_roomlanding_124ac76e ui;
+    class web_src_components_roomlanding_roomlanding_a7a83737 ui;
+    class web_src_lib_session_savesession_f1e58aae function;
+    class web_src_lib_session_clearsession_55fdacab function;
+    class web_src_components_authscreen_d5cb65e2 ui;
+    class web_src_main_7a3e5161 ui;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>AppProps</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>AppProps node in web/src/App.tsx.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>AuthScreenProps</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>AuthScreenProps node in src/components/AuthScreen.tsx.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>RoomLandingProps</code><br><small style="color:var(--muted)">src/components/RoomLanding.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>RoomLandingProps node in src/components/RoomLanding.tsx.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>SidebarProps</code><br><small style="color:var(--muted)">src/components/Sidebar.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Organizes documentation pages, navigation, or content lookup.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>ApiError</code><br><small style="color:var(--muted)">src/lib/api.ts</small></td>
+  <td><span class="tag tag-endpoint">API</span></td>
+  <td><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>request()</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>RoomLanding.tsx</code><br><small style="color:var(--muted)">src/components/RoomLanding.tsx</small></td>
+  <td><code>constructor()</code><br><small style="color:var(--muted)">src/lib/api.ts</small></td>
+  <td>ApiError node in src/lib/api.ts.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>Activity</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>LiveFeed.tsx</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>Activity node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>CreateAgentResult</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>PeoplePanel.tsx</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>CreateAgentResult node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>JoinRequest</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>PeoplePanel.tsx</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>JoinRequest node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>JoinRequestStatus</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>JoinRequestStatus node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>JoinState</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>RoomLanding.tsx</code><br><small style="color:var(--muted)">src/components/RoomLanding.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>JoinState node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>JoinStatus</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>JoinStatus node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>Member</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>PeoplePanel.tsx</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>Member node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>Message</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>Message node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>MessageKind</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>MessageKind node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>PresenceEntry</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>PresenceEntry node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>PresenceStatus</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>format.ts</code><br><small style="color:var(--muted)">src/lib/format.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>PresenceStatus node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>PublicMember</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>PublicMember node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>PublicRoom</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>PublicRooms.tsx</code><br><small style="color:var(--muted)">src/components/PublicRooms.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>PublicRoom node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>Repo</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Repo node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>Role</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>PeoplePanel.tsx</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>Role node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>Room</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Room node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>RoomMode</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>PublicRooms.tsx</code><br><small style="color:var(--muted)">src/components/PublicRooms.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>RoomMode node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>RoomPreview</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>RoomLanding.tsx</code><br><small style="color:var(--muted)">src/components/RoomLanding.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>RoomPreview node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>RoomSummary</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>Sidebar.tsx</code><br><small style="color:var(--muted)">src/components/Sidebar.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>RoomSummary node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>Session</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>AuthScreen.tsx</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small><br>+2 more</td>
+  <td>No direct outbound edge</td>
+  <td>Session node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>SessionUser</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>Sidebar.tsx</code><br><small style="color:var(--muted)">src/components/Sidebar.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>SessionUser node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>Task</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>TasksPanel.tsx</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>Task node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>TaskInput</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>TaskInput node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>TaskPatch</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>TaskPatch node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>App()</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>main.tsx</code><br><small style="color:var(--muted)">web/src/main.tsx</small><br><code>RoomLanding()</code><br><small style="color:var(--muted)">src/components/RoomLanding.tsx</small><br><code>RoomLanding.tsx</code><br><small style="color:var(--muted)">src/components/RoomLanding.tsx</small></td>
+  <td><code>appendById()</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>AuthScreen()</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small><br><code>BranchIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br>+10 more</td>
+  <td>App() node in web/src/App.tsx.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/lib/types.ts</code></td><td>25 nodes</td></tr>
+<tr><td><code>web/src/App.tsx</code></td><td>12 nodes</td></tr>
+<tr><td><code>src/components/RoomLanding.tsx</code></td><td>7 nodes</td></tr>
+<tr><td><code>src/lib/api.ts</code></td><td>6 nodes</td></tr>
+<tr><td><code>src/lib/session.ts</code></td><td>4 nodes</td></tr>
+<tr><td><code>src/components/AuthScreen.tsx</code></td><td>2 nodes</td></tr>
+<tr><td><code>src/components/Sidebar.tsx</code></td><td>1 nodes</td></tr>
+<tr><td><code>web/src/main.tsx</code></td><td>1 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: imports x53, contains x49, calls x19, imports x14. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 5. Web Components Iconstsx ====== -->
+<h2 id="web-components-iconstsx">5. Web Components Iconstsx</h2>
+<p>Web Components Iconstsx groups implementation around web, components, iconstsx, agentguidetsx, mostly in src/components/Icons.tsx, src/components/AgentGuide.tsx, src/components/PeoplePanel.tsx. This section covers 71 nodes and 228 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Web Components Iconstsx (71 nodes, 228 edges)
+    subgraph web_components_iconstsx_src_components_Icons_tsx_71a3f6b7["src/components/Icons.tsx"]
+        web_src_components_icons_arrowuprighticon_3331f1e5("ArrowUpRightIcon()<br/><small>src/components/Icons.tsx</small>")
+        web_src_components_icons_xicon_49eaf9db("XIcon()<br/><small>src/components/Icons.tsx</small>")
+        web_src_components_icons_terminalicon_5fa9e49a("TerminalIcon()<br/><small>src/components/Icons.tsx</small>")
+        web_src_components_icons_checkicon_99e0bc28("CheckIcon()<br/><small>src/components/Icons.tsx</small>")
+        web_src_components_icons_copyicon_d71025e8("CopyIcon()<br/><small>src/components/Icons.tsx</small>")
+        web_src_components_icons_usersicon_5b9380a8("UsersIcon()<br/><small>src/components/Icons.tsx</small>")
+        web_src_components_icons_branchicon_170ee1df("BranchIcon()<br/><small>src/components/Icons.tsx</small>")
+        web_src_components_icons_boticon_28313f25("BotIcon()<br/><small>src/components/Icons.tsx</small>")
+    end
+    subgraph web_components_iconstsx_src_components_AgentGuid_1588f594["src/components/AgentGuide.tsx"]
+        web_src_components_agentguide_agentguide_d9db35cd("AgentGuide()<br/><small>src/components/AgentGuide.tsx</small>")
+        web_src_components_agentguide_codeblock_1a4786b5("CodeBlock()<br/><small>src/components/AgentGuide.tsx</small>")
+        web_src_components_agentguide_agentguidepage_aebb036b("AgentGuidePage()<br/><small>src/components/AgentGuide.tsx</small>")
+    end
+    subgraph web_components_iconstsx_src_components_PeoplePan_903066ae["src/components/PeoplePanel.tsx"]
+        web_src_components_peoplepanel_39a9231a("PeoplePanel.tsx")
+        web_src_components_peoplepanel_peoplepanel_59f6ee59("PeoplePanel()<br/><small>src/components/PeoplePanel.tsx</small>")
+    end
+    subgraph web_components_iconstsx_src_components_PublicRoo_2a848bdb["src/components/PublicRooms.tsx"]
+        web_src_components_publicrooms_8c9675cb("PublicRooms.tsx")
+        web_src_components_publicrooms_publicroomspage_daee96ce("PublicRoomsPage()<br/><small>src/components/PublicRooms.tsx</small>")
+    end
+    web_src_components_authscreen_authscreen_d4497557("AuthScreen()<br/><small>src/components/AuthScreen.tsx</small>")
+    web_src_components_livefeed_3fe370ec("LiveFeed.tsx")
+    web_src_components_rightpanel_c7f3cee0("RightPanel.tsx")
+    web_src_components_agentguide_agentguide_d9db35cd -->|calls| web_src_components_icons_arrowuprighticon_3331f1e5
+    web_src_components_agentguide_agentguide_d9db35cd -->|calls| web_src_components_icons_xicon_49eaf9db
+    web_src_components_agentguide_agentguide_d9db35cd -->|calls| web_src_components_agentguide_codeblock_1a4786b5
+    web_src_components_agentguide_agentguide_d9db35cd -->|calls| web_src_components_icons_terminalicon_5fa9e49a
+    web_src_components_agentguide_agentguidepage_aebb036b -->|calls| web_src_components_agentguide_agentguide_d9db35cd
+    web_src_components_agentguide_codeblock_1a4786b5 -->|calls| web_src_components_icons_checkicon_99e0bc28
+    web_src_components_agentguide_codeblock_1a4786b5 -->|calls| web_src_components_icons_copyicon_d71025e8
+    web_src_components_authscreen_authscreen_d4497557 -->|calls| web_src_components_icons_usersicon_5b9380a8
+    web_src_components_authscreen_authscreen_d4497557 -->|calls| web_src_components_icons_branchicon_170ee1df
+    web_src_components_authscreen_authscreen_d4497557 -->|calls| web_src_components_icons_boticon_28313f25
+    web_src_components_peoplepanel_peoplepanel_59f6ee59 -->|calls| web_src_components_icons_copyicon_d71025e8
+    web_src_components_peoplepanel_peoplepanel_59f6ee59 -->|calls| web_src_components_icons_boticon_28313f25
+    web_src_components_peoplepanel_peoplepanel_59f6ee59 -->|calls| web_src_components_icons_checkicon_99e0bc28
+    web_src_components_peoplepanel_peoplepanel_59f6ee59 -->|calls| web_src_components_icons_xicon_49eaf9db
+    web_src_components_peoplepanel_peoplepanel_59f6ee59 -->|calls| web_src_components_icons_arrowuprighticon_3331f1e5
+    web_src_components_publicrooms_publicroomspage_daee96ce -->|calls| web_src_components_icons_terminalicon_5fa9e49a
+    web_src_components_publicrooms_publicroomspage_daee96ce -->|calls| web_src_components_icons_arrowuprighticon_3331f1e5
+    web_src_components_publicrooms_publicroomspage_daee96ce -->|calls| web_src_components_icons_branchicon_170ee1df
+    web_src_components_publicrooms_publicroomspage_daee96ce -->|calls| web_src_components_icons_checkicon_99e0bc28
+    web_src_components_publicrooms_publicroomspage_daee96ce -->|calls| web_src_components_icons_copyicon_d71025e8
+    web_src_components_publicrooms_publicroomspage_daee96ce -->|calls| web_src_components_icons_usersicon_5b9380a8
+    web_src_components_livefeed_3fe370ec -->|imports| web_src_components_icons_boticon_28313f25
+    web_src_components_livefeed_3fe370ec -->|imports| web_src_components_icons_branchicon_170ee1df
+    web_src_components_livefeed_3fe370ec -->|imports| web_src_components_icons_checkicon_99e0bc28
+    %% Omitted for readability: 53 nodes, 18 edges
+    class web_src_components_icons_arrowuprighticon_3331f1e5 ui;
+    class web_src_components_icons_xicon_49eaf9db ui;
+    class web_src_components_icons_terminalicon_5fa9e49a ui;
+    class web_src_components_icons_checkicon_99e0bc28 ui;
+    class web_src_components_icons_copyicon_d71025e8 ui;
+    class web_src_components_icons_usersicon_5b9380a8 ui;
+    class web_src_components_icons_branchicon_170ee1df ui;
+    class web_src_components_icons_boticon_28313f25 ui;
+    class web_src_components_agentguide_agentguide_d9db35cd ui;
+    class web_src_components_agentguide_codeblock_1a4786b5 ui;
+    class web_src_components_agentguide_agentguidepage_aebb036b ui;
+    class web_src_components_peoplepanel_39a9231a ui;
+    class web_src_components_peoplepanel_peoplepanel_59f6ee59 ui;
+    class web_src_components_publicrooms_8c9675cb ui;
+    class web_src_components_publicrooms_publicroomspage_daee96ce ui;
+    class web_src_components_authscreen_authscreen_d4497557 ui;
+    class web_src_components_livefeed_3fe370ec ui;
+    class web_src_components_rightpanel_c7f3cee0 ui;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>AgentGuideProps</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>AgentGuideProps node in src/components/AgentGuide.tsx.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>IconProps</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>IconProps node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>ModalProps</code><br><small style="color:var(--muted)">src/components/Modal.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>ModalProps node in src/components/Modal.tsx.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>Tab</code><br><small style="color:var(--muted)">src/components/RightPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Tab node in src/components/RightPanel.tsx.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>AgentGuide()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>AgentGuidePage()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><code>ArrowUpRightIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>CodeBlock()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>TerminalIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br>+1 more</td>
+  <td>AgentGuide() node in src/components/AgentGuide.tsx.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>jump()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>jump() node in src/components/AgentGuide.tsx.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>AgentGuidePage()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>main.tsx</code><br><small style="color:var(--muted)">web/src/main.tsx</small></td>
+  <td><code>AgentGuide()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td>Organizes documentation pages, navigation, or content lookup.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>CodeBlock()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>AgentGuide()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><code>CheckIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>CopyIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>CodeBlock() node in src/components/AgentGuide.tsx.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>copy()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>copy() node in src/components/AgentGuide.tsx.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>AuthScreen()</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>App()</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small></td>
+  <td><code>BotIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>BranchIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>ShieldIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br>+1 more</td>
+  <td>AuthScreen() node in src/components/AuthScreen.tsx.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>submit()</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>submit() node in src/components/AuthScreen.tsx.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>switchMode()</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>switchMode() node in src/components/AuthScreen.tsx.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>ChatPanel()</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>RoomView()</code><br><small style="color:var(--muted)">src/components/RoomView.tsx</small><br><code>RoomView.tsx</code><br><small style="color:var(--muted)">src/components/RoomView.tsx</small></td>
+  <td><code>BotIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>clockTime()</code><br><small style="color:var(--muted)">src/lib/format.ts</small><br><code>dayLabel()</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small><br>+2 more</td>
+  <td>Supports retrieval-augmented Q&amp;A or streaming chat.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>send()</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>send() node in src/components/ChatPanel.tsx.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>dayLabel()</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>ChatPanel()</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>dayLabel() node in src/components/ChatPanel.tsx.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>ActivityIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>activityIcon()</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small><br><code>LiveFeed.tsx</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small><br><code>RightPanel()</code><br><small style="color:var(--muted)">src/components/RightPanel.tsx</small><br>+1 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>ActivityIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>ArrowUpRightIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>AgentGuide()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>AgentGuide.tsx</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>PeoplePanel()</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small><br>+7 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>ArrowUpRightIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>BotIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>AuthScreen()</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small><br><code>AuthScreen.tsx</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small><br><code>ChatPanel()</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small><br>+7 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>BotIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>BranchIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>activityIcon()</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small><br><code>App()</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br>+17 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>BranchIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>ChatIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>activityIcon()</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small><br><code>LiveFeed.tsx</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small><br><code>Sidebar()</code><br><small style="color:var(--muted)">src/components/Sidebar.tsx</small><br>+1 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>Supports retrieval-augmented Q&amp;A or streaming chat.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>CheckIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>activityIcon()</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small><br><code>AgentGuide.tsx</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>CodeBlock()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br>+9 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>CheckIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>CodeIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>CodeIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>CopyIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>AgentGuide.tsx</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>CodeBlock()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>PeoplePanel()</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small><br>+9 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>CopyIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>HashIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>App()</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>PublicRooms.tsx</code><br><small style="color:var(--muted)">src/components/PublicRooms.tsx</small><br>+7 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>Caches analysis results or computes cache keys.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>ActivityIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>ArrowUpRightIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>BotIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br>+14 more</td>
+  <td>No direct outbound edge</td>
+  <td>Icon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>PlusIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>App()</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>PeoplePanel()</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small><br>+7 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>PlusIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>SearchIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>PublicRooms.tsx</code><br><small style="color:var(--muted)">src/components/PublicRooms.tsx</small><br><code>PublicRoomsPage()</code><br><small style="color:var(--muted)">src/components/PublicRooms.tsx</small></td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>SearchIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>SendIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>ChatPanel()</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small><br><code>ChatPanel.tsx</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small></td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>SendIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>ShieldIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>AuthScreen()</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small><br><code>AuthScreen.tsx</code><br><small style="color:var(--muted)">src/components/AuthScreen.tsx</small><br><code>PublicRooms.tsx</code><br><small style="color:var(--muted)">src/components/PublicRooms.tsx</small><br>+3 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>ShieldIcon() node in src/components/Icons.tsx.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>TerminalIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>AgentGuide()</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>AgentGuide.tsx</code><br><small style="color:var(--muted)">src/components/AgentGuide.tsx</small><br><code>PublicRooms.tsx</code><br><small style="color:var(--muted)">src/components/PublicRooms.tsx</small><br>+5 more</td>
+  <td><code>Icon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small></td>
+  <td>TerminalIcon() node in src/components/Icons.tsx.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/components/Icons.tsx</code></td><td>20 nodes</td></tr>
+<tr><td><code>src/components/AgentGuide.tsx</code></td><td>8 nodes</td></tr>
+<tr><td><code>src/components/PeoplePanel.tsx</code></td><td>8 nodes</td></tr>
+<tr><td><code>src/components/ChatPanel.tsx</code></td><td>5 nodes</td></tr>
+<tr><td><code>src/components/LiveFeed.tsx</code></td><td>5 nodes</td></tr>
+<tr><td><code>src/components/PublicRooms.tsx</code></td><td>4 nodes</td></tr>
+<tr><td><code>src/components/ReposPanel.tsx</code></td><td>4 nodes</td></tr>
+<tr><td><code>src/components/AuthScreen.tsx</code></td><td>3 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x88, imports x60, contains x55, imports x25. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 6. Server Storets Typests ====== -->
+<h2 id="server-storets-typests">6. Server Storets Typests</h2>
+<p>Server Storets Typests groups implementation around server, storets, typests, joinrequestrow, mostly in server/src/store.ts, server/src/types.ts. This section covers 60 nodes and 93 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Server Storets Typests (60 nodes, 93 edges)
+    server_src_store_90904272("store.ts")
+    server_src_store_createroom_b4592a9a("createRoom()<br/><small>server/src/store.ts</small>")
+    server_src_store_createagent_b0216422("createAgent()<br/><small>server/src/store.ts</small>")
+    server_src_store_addrepo_e6877de2("addRepo()<br/><small>server/src/store.ts</small>")
+    server_src_store_createjoinrequest_05e7a921("createJoinRequest()<br/><small>server/src/store.ts</small>")
+    server_src_store_createtask_d0a14b18("createTask()<br/><small>server/src/store.ts</small>")
+    server_src_store_addmember_861ce312("addMember()<br/><small>server/src/store.ts</small>")
+    server_src_store_nowiso_c7309c7b("nowIso()<br/><small>server/src/store.ts</small>")
+    server_src_store_getrepo_e6f52bd5("getRepo()<br/><small>server/src/store.ts</small>")
+    server_src_store_approvejoinrequest_23c932ab("approveJoinRequest()<br/><small>server/src/store.ts</small>")
+    server_src_store_listmembers_a4362b07("listMembers()<br/><small>server/src/store.ts</small>")
+    server_src_store_getjoinrequestbyid_66377a90("getJoinRequestById()<br/><small>server/src/store.ts</small>")
+    server_src_store_getroom_1c873d2c("getRoom()<br/><small>server/src/store.ts</small>")
+    server_src_store_newroomcode_2270b588("newRoomCode()<br/><small>server/src/store.ts</small>")
+    server_src_store_gettask_a51611bf("getTask()<br/><small>server/src/store.ts</small>")
+    server_src_store_createuser_88e7a757("createUser()<br/><small>server/src/store.ts</small>")
+    server_src_store_denyjoinrequest_76fa9ee4("denyJoinRequest()<br/><small>server/src/store.ts</small>")
+    server_src_store_maprepo_b9ef5187("mapRepo()<br/><small>server/src/store.ts</small>")
+    server_src_store_addmember_861ce312 -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_addrepo_e6877de2 -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_addrepo_e6877de2 -->|calls| server_src_store_getrepo_e6f52bd5
+    server_src_store_approvejoinrequest_23c932ab -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_createagent_b0216422 -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_createagent_b0216422 -->|calls| server_src_store_addmember_861ce312
+    server_src_store_createagent_b0216422 -->|calls| server_src_store_listmembers_a4362b07
+    server_src_store_createjoinrequest_05e7a921 -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_createjoinrequest_05e7a921 -->|calls| server_src_store_getjoinrequestbyid_66377a90
+    server_src_store_createroom_b4592a9a -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_createroom_b4592a9a -->|calls| server_src_store_addmember_861ce312
+    server_src_store_createroom_b4592a9a -->|calls| server_src_store_getroom_1c873d2c
+    server_src_store_createroom_b4592a9a -->|calls| server_src_store_newroomcode_2270b588
+    server_src_store_createtask_d0a14b18 -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_createtask_d0a14b18 -->|calls| server_src_store_gettask_a51611bf
+    server_src_store_createuser_88e7a757 -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_denyjoinrequest_76fa9ee4 -->|calls| server_src_store_nowiso_c7309c7b
+    server_src_store_getrepo_e6f52bd5 -->|calls| server_src_store_maprepo_b9ef5187
+    %% Omitted for readability: 42 nodes, 0 edges
+    class server_src_store_90904272 ui;
+    class server_src_store_createroom_b4592a9a function;
+    class server_src_store_createagent_b0216422 function;
+    class server_src_store_addrepo_e6877de2 function;
+    class server_src_store_createjoinrequest_05e7a921 function;
+    class server_src_store_createtask_d0a14b18 function;
+    class server_src_store_addmember_861ce312 function;
+    class server_src_store_nowiso_c7309c7b function;
+    class server_src_store_getrepo_e6f52bd5 function;
+    class server_src_store_approvejoinrequest_23c932ab function;
+    class server_src_store_listmembers_a4362b07 function;
+    class server_src_store_getjoinrequestbyid_66377a90 function;
+    class server_src_store_getroom_1c873d2c function;
+    class server_src_store_newroomcode_2270b588 function;
+    class server_src_store_gettask_a51611bf function;
+    class server_src_store_createuser_88e7a757 function;
+    class server_src_store_denyjoinrequest_76fa9ee4 function;
+    class server_src_store_maprepo_b9ef5187 function;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>JoinRequestRow</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>JoinRequestRow node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>NewTaskInput</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>NewTaskInput node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>Row</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Row node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>UserRow</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>UserRow node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>Activity</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Activity node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>JoinRequest</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>JoinRequest node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>JoinRequestStatus</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>JoinRequestStatus node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>Message</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Message node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>PrincipalType</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>PrincipalType node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>Repo</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Repo node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>RoomMode</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>RoomMode node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>RoomSummary</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>RoomSummary node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>Task</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Task node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>addMember()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>createAgent()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>createRoom()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>addMember() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>addRepo()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>getRepo()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>addRepo() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>approveJoinRequest()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>approveJoinRequest() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>createAgent()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>addMember()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>listMembers()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>createAgent() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>createJoinRequest()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>getJoinRequestById()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>createJoinRequest() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>createRoom()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>addMember()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>getRoom()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>newRoomCode()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br>+1 more</td>
+  <td>createRoom() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>createTask()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>getTask()</code><br><small style="color:var(--muted)">server/src/store.ts</small><br><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>createTask() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>createUser()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>createUser() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>deleteAgent()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>deleteAgent() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>deleteJoinRequestsForAgent()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Supports retrieval-augmented Q&amp;A or streaming chat.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>deletePendingJoinRequestsForUser()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>deletePendingJoinRequestsForUser() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>deleteRepo()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>deleteRepo() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>denyJoinRequest()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>nowIso()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>denyJoinRequest() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>findUserByEmail()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>findUserByEmail() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>findUserById()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>findUserById() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>getAgentRoom()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>getAgentRoom() node in server/src/store.ts.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>getJoinRequestById()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>createJoinRequest()</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>getJoinRequestById() node in server/src/store.ts.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>server/src/store.ts</code></td><td>51 nodes</td></tr>
+<tr><td><code>server/src/types.ts</code></td><td>9 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: contains x50, calls x26, imports x9, indirect call x5. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 7. Server Hubts Typests ====== -->
+<h2 id="server-hubts-typests">7. Server Hubts Typests</h2>
+<p>Server Hubts Typests groups implementation around server, hubts, typests, presenceentry, mostly in server/src/hub.ts, server/src/types.ts. This section covers 46 nodes and 105 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Server Hubts Typests (46 nodes, 105 edges)
+    server_src_hub_c4065a16("hub.ts")
+    server_src_hub_attachhub_dbe0ca1c("attachHub()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_handleclientmessage_8dd4310c("handleClientMessage()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_handlemessagesend_0236bb3f("handleMessageSend()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_setpresence_224e5ce6("setPresence()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_evictfromroom_4cd3bc32("evictFromRoom()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_registerclient_fd439094("registerClient()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_attachpendingjoin_f49789ea("attachPendingJoin()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_send_05a97807("send()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_markofflineifgone_c42d258a("markOfflineIfGone()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_broadcast_c2248a68("broadcast()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_broadcastjoinrequests_79b146f9("broadcastJoinRequests()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_broadcastmembers_e234521a("broadcastMembers()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_broadcastpresence_6c4e2006("broadcastPresence()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_presencelist_4b4ea15b("presenceList()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_buildroomstate_1756e747("buildRoomState()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_ensurepresence_6a2d56bd("ensurePresence()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_principalkey_a68ab80b("principalKey()<br/><small>server/src/hub.ts</small>")
+    server_src_hub_attachhub_dbe0ca1c -->|calls| server_src_hub_registerclient_fd439094
+    server_src_hub_attachhub_dbe0ca1c -->|calls| server_src_hub_attachpendingjoin_f49789ea
+    server_src_hub_attachhub_dbe0ca1c -->|calls| server_src_hub_handleclientmessage_8dd4310c
+    server_src_hub_attachhub_dbe0ca1c -->|calls| server_src_hub_send_05a97807
+    server_src_hub_attachhub_dbe0ca1c -->|calls| server_src_hub_markofflineifgone_c42d258a
+    server_src_hub_attachpendingjoin_f49789ea -->|calls| server_src_hub_send_05a97807
+    server_src_hub_attachpendingjoin_f49789ea -->|calls| server_src_hub_registerclient_fd439094
+    server_src_hub_broadcast_c2248a68 -->|calls| server_src_hub_send_05a97807
+    server_src_hub_broadcastjoinrequests_79b146f9 -->|calls| server_src_hub_send_05a97807
+    server_src_hub_broadcastmembers_e234521a -->|calls| server_src_hub_broadcast_c2248a68
+    server_src_hub_broadcastmembers_e234521a -->|calls| server_src_hub_broadcastpresence_6c4e2006
+    server_src_hub_broadcastpresence_6c4e2006 -->|calls| server_src_hub_broadcast_c2248a68
+    server_src_hub_broadcastpresence_6c4e2006 -->|calls| server_src_hub_presencelist_4b4ea15b
+    server_src_hub_buildroomstate_1756e747 -->|calls| server_src_hub_presencelist_4b4ea15b
+    server_src_hub_ensurepresence_6a2d56bd -->|calls| server_src_hub_principalkey_a68ab80b
+    server_src_hub_evictfromroom_4cd3bc32 -->|calls| server_src_hub_principalkey_a68ab80b
+    server_src_hub_evictfromroom_4cd3bc32 -->|calls| server_src_hub_send_05a97807
+    server_src_hub_evictfromroom_4cd3bc32 -->|calls| server_src_hub_broadcastpresence_6c4e2006
+    server_src_hub_handleclientmessage_8dd4310c -->|calls| server_src_hub_handlemessagesend_0236bb3f
+    server_src_hub_handleclientmessage_8dd4310c -->|calls| server_src_hub_send_05a97807
+    server_src_hub_handlemessagesend_0236bb3f -->|calls| server_src_hub_send_05a97807
+    server_src_hub_handlemessagesend_0236bb3f -->|calls| server_src_hub_broadcast_c2248a68
+    server_src_hub_markofflineifgone_c42d258a -->|calls| server_src_hub_broadcastpresence_6c4e2006
+    server_src_hub_presencelist_4b4ea15b -->|calls| server_src_hub_principalkey_a68ab80b
+    %% Omitted for readability: 28 nodes, 5 edges
+    class server_src_hub_c4065a16 module;
+    class server_src_hub_attachhub_dbe0ca1c function;
+    class server_src_hub_handleclientmessage_8dd4310c entry;
+    class server_src_hub_handlemessagesend_0236bb3f function;
+    class server_src_hub_setpresence_224e5ce6 function;
+    class server_src_hub_evictfromroom_4cd3bc32 function;
+    class server_src_hub_registerclient_fd439094 entry;
+    class server_src_hub_attachpendingjoin_f49789ea function;
+    class server_src_hub_send_05a97807 function;
+    class server_src_hub_markofflineifgone_c42d258a function;
+    class server_src_hub_broadcast_c2248a68 function;
+    class server_src_hub_broadcastjoinrequests_79b146f9 function;
+    class server_src_hub_broadcastmembers_e234521a function;
+    class server_src_hub_broadcastpresence_6c4e2006 function;
+    class server_src_hub_presencelist_4b4ea15b function;
+    class server_src_hub_buildroomstate_1756e747 function;
+    class server_src_hub_ensurepresence_6a2d56bd function;
+    class server_src_hub_principalkey_a68ab80b function;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>Client</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Client node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>LivePresence</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>LivePresence node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>PendingClient</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>PendingClient node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>Member</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Member node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>MessageKind</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>MessageKind node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>PresenceEntry</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>PresenceEntry node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>PresenceStatus</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>PresenceStatus node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>Principal</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>auth.ts</code><br><small style="color:var(--muted)">server/src/auth.ts</small><br><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>Principal node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>Role</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>routes.ts</code><br><small style="color:var(--muted)">server/src/routes.ts</small><br><code>store.ts</code><br><small style="color:var(--muted)">server/src/store.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>Role node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>RoomState</code><br><small style="color:var(--muted)">server/src/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>hub.ts</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>RoomState node in server/src/types.ts.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>attachHub()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>index.ts</code><br><small style="color:var(--muted)">server/src/index.ts</small></td>
+  <td><code>attachPendingJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>handleClientMessage()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>markOfflineIfGone()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+3 more</td>
+  <td>attachHub() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>attachPendingJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>attachHub()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>registerClient()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>resolveToken()</code><br><small style="color:var(--muted)">server/src/auth.ts</small><br><code>send()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>attachPendingJoin() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>broadcast()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>broadcastMembers()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>broadcastPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>handleMessageSend()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>send()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>broadcast() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>broadcastJoinRequests()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>send()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>broadcastJoinRequests() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>broadcastMembers()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>broadcast()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>broadcastPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>broadcastMembers() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>broadcastPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>broadcastMembers()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>evictFromRoom()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>handleJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+2 more</td>
+  <td><code>broadcast()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>presenceList()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>broadcastPresence() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>buildRoomState()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>presenceList()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>buildRoomState() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>ensurePresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>setPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>nowIso()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>principalKey()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>ensurePresence() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>evictFromRoom()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>broadcastPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>principalKey()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>send()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>evictFromRoom() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>handleClientMessage()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-cmd">Entry</span></td>
+  <td><code>attachHub()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>handleJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>handleLeave()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>handleMessageSend()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+2 more</td>
+  <td>handleClientMessage() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>handleJoin()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleClientMessage()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>registerClient()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>broadcastPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>buildRoomState()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>ensurePresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+1 more</td>
+  <td>handleJoin() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>handleLeave()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleClientMessage()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>markOfflineIfGone()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>handleLeave() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>handleMessageSend()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleClientMessage()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>broadcast()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>roomIdFor()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>send()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+1 more</td>
+  <td>handleMessageSend() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>handlePresenceSet()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>handleClientMessage()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>roomIdFor()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>send()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>setPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>handlePresenceSet() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>markOfflineIfGone()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>attachHub()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>handleLeave()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>broadcastPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>nowIso()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>presenceEntry()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>markOfflineIfGone() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>memberName()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>memberName() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>nowIso()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ensurePresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>markOfflineIfGone()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>setPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>nowIso() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>presenceEntry()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>markOfflineIfGone()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>principalKey()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>presenceEntry() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>presenceList()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>broadcastPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>buildRoomState()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>setPresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><code>principalKey()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td>presenceList() node in server/src/hub.ts.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>principalKey()</code><br><small style="color:var(--muted)">server/src/hub.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>ensurePresence()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>evictFromRoom()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br><code>presenceEntry()</code><br><small style="color:var(--muted)">server/src/hub.ts</small><br>+1 more</td>
+  <td>No direct outbound edge</td>
+  <td>principalKey() node in server/src/hub.ts.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>server/src/hub.ts</code></td><td>38 nodes</td></tr>
+<tr><td><code>server/src/types.ts</code></td><td>8 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: calls x51, contains x44, imports x7, references x2. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<!-- ====== 8. Web Typests Components ====== -->
+<h2 id="web-typests-components">8. Web Typests Components</h2>
+<p>Web Typests Components groups implementation around web, typests, components, taskspaneltsx, mostly in src/lib/types.ts, src/components/TasksPanel.tsx, src/lib/format.ts. This section covers 36 nodes and 51 internal edges; the diagram shows only representative relationships to stay readable.</p>
+
+<div class="mermaid">
+%%{init: {"theme": "dark", "themeVariables": {"fontSize": "15.0px", "fontFamily": "Segoe UI, system-ui, sans-serif", "primaryColor": "#1e293b", "primaryTextColor": "#e2e8f0", "primaryBorderColor": "#38bdf8", "secondaryColor": "#0f172a", "tertiaryColor": "#334155", "lineColor": "#64748b", "textColor": "#e2e8f0"}, "flowchart": {"htmlLabels": true, "curve": "basis", "nodeSpacing": 48, "rankSpacing": 64, "padding": 14, "diagramPadding": 10, "useMaxWidth": true}}}%%
+flowchart LR
+    %% Section: Web Typests Components (36 nodes, 51 edges)
+    subgraph web_typests_components_src_lib_types_ts_205043fe["src/lib/types.ts"]
+        web_src_lib_types_roomactions_bd0c944a("RoomActions<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_sendmessage_299c1b57("sendMessage()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_setpresence_27e5c65e("setPresence()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_createtask_035b909b("createTask()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_updatetask_f02870b0("updateTask()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_addrepo_cd78a3b5("addRepo()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_deleterepo_eb393f25("deleteRepo()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_createagent_41d8af07("createAgent()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_setrole_2e8a1f3f("setRole()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_removemember_75280250("removeMember()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_approvejoinrequest_e9073bab("approveJoinRequest()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_denyjoinrequest_ea66aa1f("denyJoinRequest()<br/><small>src/lib/types.ts</small>")
+        web_src_lib_types_roomactions_copy_e05370b8("copy()<br/><small>src/lib/types.ts</small>")
+    end
+    subgraph web_typests_components_src_components_TasksPanel_40737bd4["src/components/TasksPanel.tsx"]
+        web_src_components_taskspanel_f34e57ce("TasksPanel.tsx")
+        web_src_components_taskspanel_taskspanel_reassig_5371686e("reassign()<br/><small>src/components/TasksPanel.tsx</small>")
+        web_src_components_taskspanel_taskspanel_createt_ae8ba7ea("createTask()<br/><small>src/components/TasksPanel.tsx</small>")
+        web_src_components_taskspanel_taskspanel_e3209d84("TasksPanel()<br/><small>src/components/TasksPanel.tsx</small>")
+    end
+    web_src_lib_format_7dee6e35("format.ts")
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_sendmessage_299c1b57
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_setpresence_27e5c65e
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_createtask_035b909b
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_updatetask_f02870b0
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_addrepo_cd78a3b5
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_deleterepo_eb393f25
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_createagent_41d8af07
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_setrole_2e8a1f3f
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_removemember_75280250
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_approvejoinrequest_e9073bab
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_denyjoinrequest_ea66aa1f
+    web_src_lib_types_roomactions_bd0c944a -->|method| web_src_lib_types_roomactions_copy_e05370b8
+    web_src_components_taskspanel_taskspanel_createt_ae8ba7ea -->|calls| web_src_components_taskspanel_taskspanel_createt_ae8ba7ea
+    web_src_components_taskspanel_f34e57ce -->|imports| web_src_lib_types_roomactions_bd0c944a
+    web_src_components_taskspanel_f34e57ce -->|imports| web_src_lib_format_7dee6e35
+    %% Omitted for readability: 18 nodes, 0 edges
+    class web_src_lib_types_roomactions_bd0c944a klass;
+    class web_src_lib_types_roomactions_sendmessage_299c1b57 function;
+    class web_src_lib_types_roomactions_setpresence_27e5c65e function;
+    class web_src_lib_types_roomactions_createtask_035b909b function;
+    class web_src_lib_types_roomactions_updatetask_f02870b0 function;
+    class web_src_lib_types_roomactions_addrepo_cd78a3b5 function;
+    class web_src_lib_types_roomactions_deleterepo_eb393f25 function;
+    class web_src_lib_types_roomactions_createagent_41d8af07 function;
+    class web_src_lib_types_roomactions_setrole_2e8a1f3f function;
+    class web_src_lib_types_roomactions_removemember_75280250 function;
+    class web_src_lib_types_roomactions_approvejoinrequest_e9073bab function;
+    class web_src_lib_types_roomactions_denyjoinrequest_ea66aa1f function;
+    class web_src_lib_types_roomactions_copy_e05370b8 function;
+    class web_src_components_taskspanel_f34e57ce ui;
+    class web_src_components_taskspanel_taskspanel_reassig_5371686e ui;
+    class web_src_components_taskspanel_taskspanel_createt_ae8ba7ea ui;
+    class web_src_components_taskspanel_taskspanel_e3209d84 ui;
+    class web_src_lib_format_7dee6e35 module;
+    classDef entry fill:#422006,stroke:#fbbf24,color:#fde68a,stroke-width:1px;
+    classDef api fill:#450a0a,stroke:#f87171,color:#fee2e2,stroke-width:1px;
+    classDef async fill:#2e1065,stroke:#a78bfa,color:#ede9fe,stroke-width:1px;
+    classDef klass fill:#064e3b,stroke:#34d399,color:#d1fae5,stroke-width:1px;
+    classDef ui fill:#831843,stroke:#f472b6,color:#fce7f3,stroke-width:1px;
+    classDef module fill:#172554,stroke:#60a5fa,color:#dbeafe,stroke-width:1px;
+    classDef test fill:#3f3f46,stroke:#a1a1aa,color:#f4f4f5,stroke-width:1px;
+    classDef concept fill:#292524,stroke:#a8a29e,color:#fafaf9,stroke-dasharray:4 3;
+    classDef function fill:#0f172a,stroke:#38bdf8,color:#e0f2fe,stroke-width:1px;
+</div>
+
+<h3>Call Details</h3>
+<table class="call-table">
+<tr>
+  <th style="width:5%">#</th>
+  <th style="width:28%">Node</th>
+  <th style="width:10%">Type</th>
+  <th style="width:17%">Caller</th>
+  <th style="width:20%">Callees</th>
+  <th style="width:20%">Description</th>
+</tr>
+<tr>
+  <td>1</td>
+  <td><code>ChatPanelProps</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>Supports retrieval-augmented Q&amp;A or streaming chat.</td>
+</tr>
+<tr>
+  <td>2</td>
+  <td><code>LiveFeedProps</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>LiveFeedProps node in src/components/LiveFeed.tsx.</td>
+</tr>
+<tr>
+  <td>3</td>
+  <td><code>PeoplePanelProps</code><br><small style="color:var(--muted)">src/components/PeoplePanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>PeoplePanelProps node in src/components/PeoplePanel.tsx.</td>
+</tr>
+<tr>
+  <td>4</td>
+  <td><code>ReposPanelProps</code><br><small style="color:var(--muted)">src/components/ReposPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>ReposPanelProps node in src/components/ReposPanel.tsx.</td>
+</tr>
+<tr>
+  <td>5</td>
+  <td><code>RightPanelProps</code><br><small style="color:var(--muted)">src/components/RightPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>RightPanelProps node in src/components/RightPanel.tsx.</td>
+</tr>
+<tr>
+  <td>6</td>
+  <td><code>RoomViewProps</code><br><small style="color:var(--muted)">src/components/RoomView.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>RoomViewProps node in src/components/RoomView.tsx.</td>
+</tr>
+<tr>
+  <td>7</td>
+  <td><code>TasksPanelProps</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>TasksPanelProps node in src/components/TasksPanel.tsx.</td>
+</tr>
+<tr>
+  <td>8</td>
+  <td><code>PrincipalType</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>TasksPanel.tsx</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>PrincipalType node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>9</td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>ChatPanel.tsx</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small><br><code>LiveFeed.tsx</code><br><small style="color:var(--muted)">src/components/LiveFeed.tsx</small><br>+5 more</td>
+  <td><code>addRepo()</code><br><small style="color:var(--muted)">src/lib/types.ts</small><br><code>approveJoinRequest()</code><br><small style="color:var(--muted)">src/lib/types.ts</small><br><code>copy()</code><br><small style="color:var(--muted)">src/lib/types.ts</small><br>+9 more</td>
+  <td>RoomActions node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>10</td>
+  <td><code>RoomState</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>api.ts</code><br><small style="color:var(--muted)">src/lib/api.ts</small><br><code>App.tsx</code><br><small style="color:var(--muted)">web/src/App.tsx</small><br><code>ChatPanel.tsx</code><br><small style="color:var(--muted)">src/components/ChatPanel.tsx</small><br>+6 more</td>
+  <td>No direct outbound edge</td>
+  <td>RoomState node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>11</td>
+  <td><code>TaskStatus</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-class">Class</span></td>
+  <td><code>format.ts</code><br><small style="color:var(--muted)">src/lib/format.ts</small><br><code>TasksPanel.tsx</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>TaskStatus node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>12</td>
+  <td><code>splitPrincipal()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>createTask()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small><br><code>reassign()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>splitPrincipal() node in src/components/TasksPanel.tsx.</td>
+</tr>
+<tr>
+  <td>13</td>
+  <td><code>TasksPanel()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>RightPanel()</code><br><small style="color:var(--muted)">src/components/RightPanel.tsx</small><br><code>RightPanel.tsx</code><br><small style="color:var(--muted)">src/components/RightPanel.tsx</small></td>
+  <td><code>BranchIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br><code>parsePaths()</code><br><small style="color:var(--muted)">src/lib/format.ts</small><br><code>PlusIcon()</code><br><small style="color:var(--muted)">src/components/Icons.tsx</small><br>+2 more</td>
+  <td>TasksPanel() node in src/components/TasksPanel.tsx.</td>
+</tr>
+<tr>
+  <td>14</td>
+  <td><code>changeTask()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>reassign()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>changeTask() node in src/components/TasksPanel.tsx.</td>
+</tr>
+<tr>
+  <td>15</td>
+  <td><code>createTask()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td><code>createTask()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td><code>createTask()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small><br><code>splitPrincipal()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>createTask() node in src/components/TasksPanel.tsx.</td>
+</tr>
+<tr>
+  <td>16</td>
+  <td><code>reassign()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td><span class="tag tag-hook">UI</span></td>
+  <td>External entry / no inbound edge</td>
+  <td><code>changeTask()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small><br><code>splitPrincipal()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>reassign() node in src/components/TasksPanel.tsx.</td>
+</tr>
+<tr>
+  <td>17</td>
+  <td><code>parsePaths()</code><br><small style="color:var(--muted)">src/lib/format.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>TasksPanel()</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small><br><code>TasksPanel.tsx</code><br><small style="color:var(--muted)">src/components/TasksPanel.tsx</small></td>
+  <td>No direct outbound edge</td>
+  <td>parsePaths() node in src/lib/format.ts.</td>
+</tr>
+<tr>
+  <td>18</td>
+  <td><code>principalKey()</code><br><small style="color:var(--muted)">src/lib/format.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td>External entry / no inbound edge</td>
+  <td>No direct outbound edge</td>
+  <td>principalKey() node in src/lib/format.ts.</td>
+</tr>
+<tr>
+  <td>19</td>
+  <td><code>.addRepo()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.addRepo() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>20</td>
+  <td><code>.approveJoinRequest()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.approveJoinRequest() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>21</td>
+  <td><code>.copy()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.copy() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>22</td>
+  <td><code>.createAgent()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.createAgent() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>23</td>
+  <td><code>.createTask()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.createTask() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>24</td>
+  <td><code>.deleteRepo()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.deleteRepo() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>25</td>
+  <td><code>.denyJoinRequest()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.denyJoinRequest() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>26</td>
+  <td><code>.removeMember()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.removeMember() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>27</td>
+  <td><code>.sendMessage()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.sendMessage() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>28</td>
+  <td><code>.setPresence()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.setPresence() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>29</td>
+  <td><code>.setRole()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.setRole() node in src/lib/types.ts.</td>
+</tr>
+<tr>
+  <td>30</td>
+  <td><code>.updateTask()</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td><span class="tag tag-func">Function</span></td>
+  <td><code>RoomActions</code><br><small style="color:var(--muted)">src/lib/types.ts</small></td>
+  <td>No direct outbound edge</td>
+  <td>.updateTask() node in src/lib/types.ts.</td>
+</tr>
+</table>
+
+<div class="grid">
+  <div class="card">
+    <h4>Key Files</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><th>File</th><th>Coverage</th></tr>
+      <tr><td><code>src/lib/types.ts</code></td><td>16 nodes</td></tr>
+<tr><td><code>src/components/TasksPanel.tsx</code></td><td>8 nodes</td></tr>
+<tr><td><code>src/lib/format.ts</code></td><td>6 nodes</td></tr>
+<tr><td><code>src/components/ChatPanel.tsx</code></td><td>1 nodes</td></tr>
+<tr><td><code>src/components/LiveFeed.tsx</code></td><td>1 nodes</td></tr>
+<tr><td><code>src/components/PeoplePanel.tsx</code></td><td>1 nodes</td></tr>
+<tr><td><code>src/components/ReposPanel.tsx</code></td><td>1 nodes</td></tr>
+<tr><td><code>src/components/RightPanel.tsx</code></td><td>1 nodes</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Design Notes</h4>
+    <p>This section comes from graphify community clustering. Relationship summary: references x14, method x12, contains x12, imports x7. The diagram prioritizes high-confidence calls or usage relationships; the table keeps the broader node inventory.</p>
+  </div>
+</div>
+<hr>
+
+<h2 id="stats">Project Statistics</h2>
+
+<div class="grid">
+  <div class="card">
+    <h4>Graph</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><td>Nodes</td><td>454</td></tr>
+      <tr><td>Edges</td><td>1016</td></tr>
+      <tr><td>Hyperedges</td><td>0</td></tr>
+      <tr><td>Communities</td><td>12</td></tr>
+      <tr><td>Documented Sections</td><td>7</td></tr>
+    </table>
+  </div>
+  <div class="card">
+    <h4>Edge Confidence</h4>
+    <table style="width:100%;font-size:0.85rem;">
+      <tr><td>EXTRACTED</td><td>1007</td></tr>
+      <tr><td>INFERRED</td><td>9</td></tr>
+      <tr><td>AMBIGUOUS</td><td>0</td></tr>
+    </table>
+  </div>
+</div>
+
+<div style="text-align:center; padding:40px 0; color: var(--muted); font-size:0.9rem;">
+  <p>RoomForge — Architecture Documentation</p>
+  <p>Generated: 2026-10-23 12:45 UTC · graphify callflow-html</p>
+</div>
+
+</div><!-- .container -->
+
+<script>
+(function () {
+  const mermaidConfig = {
+    startOnLoad: false,
+    theme: 'dark',
+    securityLevel: 'loose',
+    flowchart: { htmlLabels: true, useMaxWidth: true },
+    themeVariables: {
+      primaryColor: '#1e293b',
+      primaryTextColor: '#e2e8f0',
+      primaryBorderColor: '#38bdf8',
+      secondaryColor: '#0f172a',
+      tertiaryColor: '#334155',
+      lineColor: '#64748b',
+      textColor: '#e2e8f0',
+    }
+  };
+
+  mermaid.initialize(mermaidConfig);
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function enhanceMermaidDiagrams() {
+    document.querySelectorAll('.mermaid').forEach((container) => {
+      if (container.dataset.zoomReady === 'true') return;
+      const svg = container.querySelector('svg');
+      if (!svg) return;
+
+      container.dataset.zoomReady = 'true';
+      container.classList.add('is-enhanced');
+
+      const viewport = document.createElement('div');
+      viewport.className = 'mermaid-viewport';
+      svg.parentNode.insertBefore(viewport, svg);
+      viewport.appendChild(svg);
+
+      const toolbar = document.createElement('div');
+      toolbar.className = 'mermaid-toolbar';
+      toolbar.innerHTML = [
+        '<button type="button" data-action="zoom-out" title="Zoom out">-</button>',
+        '<span class="zoom-level" data-role="level">100%</span>',
+        '<button type="button" data-action="zoom-in" title="Zoom in">+</button>',
+        '<button type="button" data-action="fit" title="Fit width">Fit</button>',
+        '<button type="button" data-action="reset" title="Reset view">Reset</button>'
+      ].join('');
+      container.insertBefore(toolbar, viewport);
+
+      const state = { scale: 1, x: 0, y: 0, dragging: false, startX: 0, startY: 0, originX: 0, originY: 0 };
+      const level = toolbar.querySelector('[data-role="level"]');
+
+      function applyTransform() {
+        svg.style.transform = `translate(${state.x}px, ${state.y}px) scale(${state.scale})`;
+        level.textContent = `${Math.round(state.scale * 100)}%`;
+      }
+
+      function zoomBy(delta) {
+        state.scale = clamp(state.scale + delta, 0.25, 3);
+        applyTransform();
+      }
+
+      function reset() {
+        state.scale = 1;
+        state.x = 0;
+        state.y = 0;
+        applyTransform();
+      }
+
+      function fitWidth() {
+        const rawWidth = svg.viewBox && svg.viewBox.baseVal && svg.viewBox.baseVal.width
+          ? svg.viewBox.baseVal.width
+          : svg.getBoundingClientRect().width / state.scale;
+        if (!rawWidth) {
+          reset();
+          return;
+        }
+        state.scale = clamp((viewport.clientWidth - 48) / rawWidth, 0.25, 1.4);
+        state.x = 0;
+        state.y = 0;
+        applyTransform();
+      }
+
+      toolbar.addEventListener('click', (event) => {
+        const button = event.target.closest('button[data-action]');
+        if (!button) return;
+        const action = button.dataset.action;
+        if (action === 'zoom-in') zoomBy(0.15);
+        if (action === 'zoom-out') zoomBy(-0.15);
+        if (action === 'fit') fitWidth();
+        if (action === 'reset') reset();
+      });
+
+      viewport.addEventListener('wheel', (event) => {
+        if (!event.ctrlKey && !event.metaKey) return;
+        event.preventDefault();
+        zoomBy(event.deltaY < 0 ? 0.1 : -0.1);
+      }, { passive: false });
+
+      viewport.addEventListener('pointerdown', (event) => {
+        if (event.button !== 0) return;
+        state.dragging = true;
+        state.startX = event.clientX;
+        state.startY = event.clientY;
+        state.originX = state.x;
+        state.originY = state.y;
+        viewport.classList.add('is-dragging');
+        viewport.setPointerCapture(event.pointerId);
+      });
+
+      viewport.addEventListener('pointermove', (event) => {
+        if (!state.dragging) return;
+        state.x = state.originX + event.clientX - state.startX;
+        state.y = state.originY + event.clientY - state.startY;
+        applyTransform();
+      });
+
+      function endDrag(event) {
+        if (!state.dragging) return;
+        state.dragging = false;
+        viewport.classList.remove('is-dragging');
+        if (viewport.hasPointerCapture(event.pointerId)) {
+          viewport.releasePointerCapture(event.pointerId);
+        }
+      }
+
+      viewport.addEventListener('pointerup', endDrag);
+      viewport.addEventListener('pointercancel', endDrag);
+      applyTransform();
+    });
+  }
+
+  function renderMermaid() {
+    const result = mermaid.run
+      ? mermaid.run({ querySelector: '.mermaid' })
+      : Promise.resolve();
+    Promise.resolve(result)
+      .then(enhanceMermaidDiagrams)
+      .catch((error) => {
+        console.error('Mermaid render failed:', error);
+        enhanceMermaidDiagrams();
+      });
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', renderMermaid);
+  } else {
+    renderMermaid();
+  }
+})();
+</script>
+
+</body>
+</html>

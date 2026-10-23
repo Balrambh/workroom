@@ -234,10 +234,17 @@ router.get('/agent/connect/:token', (req, res) => {
   );
 });
 
-/* Public room page: anyone holding the five-character room code can see what
+/* Public rooms directory: returns all public rooms */
+router.get(['/rooms/public', '/room', '/rooms/all'], (req, res) => {
+  previewHeaders(res);
+  const rooms = store.listPublicRooms();
+  res.json({ rooms });
+});
+
+/* Public room page: anyone holding the room code can see what
  * the room is and who is in it, but joining still needs an admin. */
 router.get('/rooms/public/:code', (req, res) => {
-  const code = req.params.code.trim().toUpperCase();
+  const code = req.params.code.trim();
   const room = store.getRoomByCode(code);
   if (!room) throw new HttpError(404, 'No room matches that code');
 
@@ -258,7 +265,7 @@ router.get('/rooms/public/:code', (req, res) => {
 /* Agents can ask to join any room they can see. This returns a pending ticket
  * and a socket URL that waits for an admin; no account or token is needed yet. */
 router.get('/agent/join/:code', (req, res) => {
-  const code = req.params.code.trim().toUpperCase();
+  const code = req.params.code.trim();
   const room = store.getRoomByCode(code);
   if (!room) throw new HttpError(404, 'No room matches that code');
 
@@ -404,7 +411,7 @@ router.get('/me', (req, res) => {
 router.get('/join/:code/status', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   userOnly(principal);
-  const room = store.getRoomByCode(req.params.code.trim().toUpperCase());
+  const room = store.getRoomByCode(req.params.code.trim());
   if (!room) throw new HttpError(404, 'No room matches that code');
 
   const membership = store.getMembership(room.id, principal);
@@ -435,7 +442,7 @@ router.get('/join/:code/status', (req, res) => {
 router.get('/join/:code', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   userOnly(principal);
-  const room = store.getRoomByCode(req.params.code.trim().toUpperCase());
+  const room = store.getRoomByCode(req.params.code.trim());
   if (!room) throw new HttpError(404, 'No room matches that code');
 
   const membership = store.getMembership(room.id, principal);
@@ -512,8 +519,8 @@ router.post('/rooms', (req, res) => {
 router.post('/rooms/join', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   userOnly(principal);
-  const body = z.object({ code: z.string().trim().min(4).max(16) }).parse(req.body);
-  const room = store.getRoomByCode(body.code.toUpperCase());
+  const body = z.object({ code: z.string().trim().min(3).max(16) }).parse(req.body);
+  const room = store.getRoomByCode(body.code);
   if (!room) throw new HttpError(404, 'No room matches that invite code');
 
   const existing = store.getMembership(room.id, principal);
