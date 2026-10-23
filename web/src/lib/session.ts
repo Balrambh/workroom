@@ -1,4 +1,4 @@
-import type { Session } from './types';
+import type { Session, SessionUser } from './types';
 
 const SESSION_KEY = 'roomforge.session';
 
@@ -6,8 +6,11 @@ export function readSession(): Session | null {
   try {
     const raw = localStorage.getItem(SESSION_KEY);
     if (!raw) return null;
-    const parsed = JSON.parse(raw) as Session;
-    return parsed?.token && parsed?.user ? parsed : null;
+    const parsed = JSON.parse(raw) as { user?: SessionUser; token?: string };
+    if (!parsed?.user?.id || !parsed.user.name || !parsed.user.email) return null;
+    const session: Session = { user: parsed.user };
+    if ('token' in parsed) saveSession(session);
+    return session;
   } catch {
     return null;
   }

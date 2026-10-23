@@ -11,6 +11,8 @@ export const db = new DatabaseSync(process.env.DB_PATH ?? resolve(dataDir, 'room
 
 db.exec(`
   PRAGMA journal_mode = WAL;
+  PRAGMA synchronous = NORMAL;
+  PRAGMA busy_timeout = 5000;
   PRAGMA foreign_keys = ON;
 
   CREATE TABLE IF NOT EXISTS users (
@@ -223,3 +225,25 @@ db.exec(`
   SET last_seq = MAX(last_seq, COALESCE((SELECT MAX(seq) FROM messages WHERE messages.room_id = rooms.id), 0))
   WHERE last_seq < COALESCE((SELECT MAX(seq) FROM messages WHERE messages.room_id = rooms.id), 0)
 `);
+
+export function isDbHealthy(): boolean {
+  try {
+    db.prepare('SELECT 1').get();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function closeDb(): void {
+  try {
+    db.exec('PRAGMA wal_checkpoint(TRUNCATE)');
+  } catch {
+    // checkpoint is best-effort during shutdown
+  }
+  try {
+    db.close();
+  } catch {
+    // already closed
+  }
+}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiError, api, setAuthToken } from './lib/api';
+import { ApiError, api } from './lib/api';
 import { clearSession, readSession, saveSession } from './lib/session';
 import type {
   Activity,
@@ -80,11 +80,6 @@ export default function App({ initialCode }: AppProps = {}) {
   }, [activeId]);
 
   useEffect(() => {
-    if (!session) return;
-    setAuthToken(session.token);
-  }, [session]);
-
-  useEffect(() => {
     if (!navOpen) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === 'Escape') setNavOpen(false);
@@ -100,7 +95,7 @@ export default function App({ initialCode }: AppProps = {}) {
     if (next && next.startsWith('/') && !next.startsWith('//')) {
       window.location.assign(next);
     }
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   function showNotice(message: string) {
     setNotice(message);
@@ -109,7 +104,6 @@ export default function App({ initialCode }: AppProps = {}) {
   }
 
   function handleAuth(next: Session) {
-    setAuthToken(next.token);
     saveSession(next);
     initialSelected.current = false;
     initialTarget.current = roomTarget();
@@ -121,7 +115,7 @@ export default function App({ initialCode }: AppProps = {}) {
   }
 
   function handleLogout() {
-    setAuthToken('');
+    void api.logout().catch(() => {});
     clearSession();
     setSession(null);
     setRooms([]);
@@ -160,7 +154,7 @@ export default function App({ initialCode }: AppProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!session || !roomsLoaded) return;
@@ -317,9 +311,7 @@ export default function App({ initialCode }: AppProps = {}) {
     const openSocket = () => {
       if (disposed) return;
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      socket = new WebSocket(
-        `${protocol}://${window.location.host}/ws?token=${encodeURIComponent(session.token)}`,
-      );
+      socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -359,7 +351,7 @@ export default function App({ initialCode }: AppProps = {}) {
       setConnected(false);
       setActiveSocket(null);
     };
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!session || !roomsLoaded) return;
@@ -398,7 +390,7 @@ export default function App({ initialCode }: AppProps = {}) {
         current.send(JSON.stringify({ type: 'room.leave', roomId: activeId }));
       }
     };
-  }, [activeId, session?.token, roomsLoaded]);
+  }, [activeId, session?.user.id, roomsLoaded]);
 
   async function refreshIfOffline(roomId: string) {
     if (socketRef.current?.readyState === WebSocket.OPEN) return;

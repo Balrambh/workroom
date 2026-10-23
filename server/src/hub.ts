@@ -1,7 +1,7 @@
 import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { RawData } from 'ws';
-import { resolveToken } from './auth.js';
+import { readSessionToken, resolveToken } from './auth.js';
 import { HttpError } from './errors.js';
 import * as store from './store.js';
 import type {
@@ -64,7 +64,16 @@ const principalKey = (type: string, id: string) => `${type}:${id}`;
 const nowIso = () => new Date().toISOString();
 
 function send(ws: WebSocket, payload: unknown): void {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+  if (ws.readyState !== WebSocket.OPEN) return;
+  try {
+    ws.send(JSON.stringify(payload));
+  } catch {
+    try {
+      ws.terminate();
+    } catch {
+      // socket already gone
+    }
+  }
 }
 
 function truncate(text: string, max = 90): string {
@@ -777,12 +786,17 @@ export function rejectJoinRequestSocket(requestId: string, message: string): voi
   }
 }
 
-export function attachHub(server: HttpServer): void {
+export function attachHub(server: HttpServer): () => void {
   const wss = new WebSocketServer({ server, path: '/ws', maxPayload: 128 * 1024 });
+
+  wss.on('error', (error) => {
+    console.error('WebSocket server error', error);
+  });
 
   wss.on('connection', (ws, req) => {
     const url = new URL(req.url ?? '/ws', 'http://localhost');
-    const principal = resolveToken(url.searchParams.get('token') ?? '');
+    const explicitToken = url.searchParams.get('token') ?? '';
+    const principal = resolveToken(explicitToken) ?? resolveToken(readSessionToken(req));
     const joinKey = url.searchParams.get('join') ?? '';
 
     if (principal) {
@@ -797,7 +811,12 @@ export function attachHub(server: HttpServer): void {
     ws.on('message', (raw) => {
       const client = clients.get(ws);
       if (client) {
-        handleClientMessage(client, raw);
+        try {
+          handleClientMessage(client, raw);
+        } catch (error) {
+          console.error('WebSocket message failed', error);
+          send(ws, { type: 'error', message: 'Something went wrong. Try again.' });
+        }
         return;
       }
       if (!pendingClients.has(ws)) return;
@@ -858,6 +877,17 @@ export function attachHub(server: HttpServer): void {
   }, 30_000);
   heartbeat.unref();
   wss.on('close', () => clearInterval(heartbeat));
+
+  return () => {
+    for (const ws of wss.clients) {
+      try {
+        ws.terminate();
+      } catch {
+        // socket already gone
+      }
+    }
+    wss.close();
+  };
 }
 
 export function memberName(roomId: string, type: string, id: string): string | null {

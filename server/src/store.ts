@@ -621,7 +621,11 @@ export function insertMessage(
       clientMessageId: options.clientMessageId ?? null,
     };
   } catch (error) {
-    db.exec('ROLLBACK');
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // the transaction may already be closed; keep the original error
+    }
     throw error;
   }
 }
@@ -948,4 +952,46 @@ export function listActivity(roomId: string, limit = 80): Activity[] {
     .prepare('SELECT * FROM activity WHERE room_id = ? ORDER BY created_at DESC LIMIT ?')
     .all(roomId, limit) as Row[];
   return rows.map(mapActivity);
+}
+
+export interface TriggerQueueStats {
+  pending: number;
+  failed: number;
+  delivered24h: number;
+  oldestPendingAt: string | null;
+}
+
+export function pruneTriggerEvents(beforeIso: string): number {
+  const result = db
+    .prepare("DELETE FROM trigger_events WHERE status IN ('delivered', 'failed') AND created_at < ?")
+    .run(beforeIso);
+  return Number(result.changes);
+}
+
+export function expireStaleJoinRequests(beforeIso: string, nowIsoValue = new Date().toISOString()): number {
+  const result = db
+    .prepare(
+      "UPDATE room_join_requests SET status = 'denied', decided_at = ? WHERE status = 'pending' AND created_at < ?",
+    )
+    .run(nowIsoValue, beforeIso);
+  return Number(result.changes);
+}
+
+export function triggerQueueStats(): TriggerQueueStats {
+  const counts = db
+    .prepare('SELECT status, COUNT(*) AS count FROM trigger_events GROUP BY status')
+    .all() as { status: string; count: number }[];
+  const byStatus = new Map(counts.map((row) => [row.status, Number(row.count)]));
+  const oldest = db
+    .prepare("SELECT MIN(created_at) AS at FROM trigger_events WHERE status = 'pending'")
+    .get() as { at: string | null };
+  const delivered = db
+    .prepare("SELECT COUNT(*) AS count FROM trigger_events WHERE status = 'delivered' AND delivered_at >= ?")
+    .get(new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString()) as { count: number };
+  return {
+    pending: byStatus.get('pending') ?? 0,
+    failed: byStatus.get('failed') ?? 0,
+    delivered24h: Number(delivered.count),
+    oldestPendingAt: oldest.at ?? null,
+  };
 }

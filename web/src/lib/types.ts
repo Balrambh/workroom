@@ -28,7 +28,6 @@ export interface SessionUser {
 }
 
 export interface Session {
-  token: string;
   user: SessionUser;
 }
 

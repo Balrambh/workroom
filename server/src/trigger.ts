@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { HttpError } from './errors.js';
 import * as hub from './hub.js';
 import * as store from './store.js';
+import type { TriggerEventRow } from './store.js';
 import {
   ALLOW_PRIVATE_TRIGGER_URLS,
   IS_PRODUCTION,
@@ -211,55 +212,73 @@ function postSystemMessage(roomId: string, content: string): void {
 }
 
 /* Poll the trigger_events queue once a second. SQLite has no SKIP LOCKED, so a
- * single in-process busy flag prevents double delivery. */
+ * single in-process busy flag prevents double delivery. Events are independent
+ * (one agent owns at most one pending wake per room), so a small worker pool
+ * keeps one slow endpoint from delaying every other agent's wake. */
+const DELIVERY_CONCURRENCY = 4;
 let delivering = false;
+
+async function deliverEvent(event: TriggerEventRow): Promise<void> {
+  const agent = store.getAgentTrigger(event.agent_id);
+  if (!agent || !agent.triggerUrl || !agent.triggerSecretEnc) {
+    store.markTriggerFailure(event.id, MAX_TRIGGER_ATTEMPTS, null, 'agent has no trigger target');
+    return;
+  }
+  const secret = decryptSecret(agent.triggerSecretEnc);
+  if (!secret) {
+    store.markTriggerFailure(event.id, MAX_TRIGGER_ATTEMPTS, null, 'trigger secret could not be decrypted');
+    return;
+  }
+
+  const result = await sendTrigger(agent.triggerUrl, secret, {
+    eventId: event.id,
+    type: 'mention',
+    roomId: event.room_id,
+    agentId: event.agent_id,
+    seq: event.seq,
+    messageId: event.message_id,
+    createdAt: event.created_at,
+  });
+
+  if (result.ok) {
+    store.markTriggerDelivered(event.id);
+    store.setAgentWakeState(event.agent_id, 'waking');
+    hub.broadcastPresence(event.room_id);
+    return;
+  }
+
+  const attempts = event.attempts + 1;
+  const error = result.error ?? `HTTP ${result.status}`;
+  if (attempts >= MAX_TRIGGER_ATTEMPTS) {
+    store.markTriggerFailure(event.id, attempts, null, error);
+    store.setAgentWakeState(event.agent_id, 'unreachable');
+    postSystemMessage(event.room_id, `${agent.name} is unreachable (trigger failed).`);
+    hub.broadcastPresence(event.room_id);
+  } else {
+    const delay = TRIGGER_RETRY_DELAYS_MS[attempts - 1] ?? 30000;
+    store.markTriggerFailure(event.id, attempts, new Date(Date.now() + delay).toISOString(), error);
+  }
+}
 
 export async function deliverDueTriggers(): Promise<void> {
   if (delivering) return;
   delivering = true;
   try {
     const due = store.listDueTriggerEvents(new Date().toISOString());
-    for (const event of due) {
-      const agent = store.getAgentTrigger(event.agent_id);
-      if (!agent || !agent.triggerUrl || !agent.triggerSecretEnc) {
-        store.markTriggerFailure(event.id, MAX_TRIGGER_ATTEMPTS, null, 'agent has no trigger target');
-        continue;
+    let next = 0;
+    const workers = Array.from({ length: Math.min(DELIVERY_CONCURRENCY, due.length) }, async () => {
+      for (;;) {
+        const event = due[next];
+        next += 1;
+        if (!event) return;
+        try {
+          await deliverEvent(event);
+        } catch (error) {
+          console.error('trigger delivery failed', event.id, error);
+        }
       }
-      const secret = decryptSecret(agent.triggerSecretEnc);
-      if (!secret) {
-        store.markTriggerFailure(event.id, MAX_TRIGGER_ATTEMPTS, null, 'trigger secret could not be decrypted');
-        continue;
-      }
-
-      const result = await sendTrigger(agent.triggerUrl, secret, {
-        eventId: event.id,
-        type: 'mention',
-        roomId: event.room_id,
-        agentId: event.agent_id,
-        seq: event.seq,
-        messageId: event.message_id,
-        createdAt: event.created_at,
-      });
-
-      if (result.ok) {
-        store.markTriggerDelivered(event.id);
-        store.setAgentWakeState(event.agent_id, 'waking');
-        hub.broadcastPresence(event.room_id);
-        continue;
-      }
-
-      const attempts = event.attempts + 1;
-      const error = result.error ?? `HTTP ${result.status}`;
-      if (attempts >= MAX_TRIGGER_ATTEMPTS) {
-        store.markTriggerFailure(event.id, attempts, null, error);
-        store.setAgentWakeState(event.agent_id, 'unreachable');
-        postSystemMessage(event.room_id, `${agent.name} is unreachable (trigger failed).`);
-        hub.broadcastPresence(event.room_id);
-      } else {
-        const delay = TRIGGER_RETRY_DELAYS_MS[attempts - 1] ?? 30000;
-        store.markTriggerFailure(event.id, attempts, new Date(Date.now() + delay).toISOString(), error);
-      }
-    }
+    });
+    await Promise.all(workers);
   } finally {
     delivering = false;
   }
@@ -278,9 +297,32 @@ export function expireStaleWakes(): void {
   }
 }
 
+let deliveryTimer: ReturnType<typeof setInterval> | null = null;
+let expiryTimer: ReturnType<typeof setInterval> | null = null;
+
 export function startTriggerWorkers(): void {
-  setInterval(() => {
+  if (deliveryTimer) return;
+  deliveryTimer = setInterval(() => {
     void deliverDueTriggers().catch((error) => console.error('trigger delivery failed', error));
-  }, 1000).unref();
-  setInterval(expireStaleWakes, 5000).unref();
+  }, 1000);
+  deliveryTimer.unref();
+  expiryTimer = setInterval(() => {
+    try {
+      expireStaleWakes();
+    } catch (error) {
+      console.error('wake expiry failed', error);
+    }
+  }, 5000);
+  expiryTimer.unref();
+}
+
+export function stopTriggerWorkers(): void {
+  if (deliveryTimer) {
+    clearInterval(deliveryTimer);
+    deliveryTimer = null;
+  }
+  if (expiryTimer) {
+    clearInterval(expiryTimer);
+    expiryTimer = null;
+  }
 }

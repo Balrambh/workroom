@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { ApiError, api, setAuthToken } from '../lib/api';
+import { ApiError, api } from '../lib/api';
 import { clearSession, readSession } from '../lib/session';
 import type { JoinState, RoomPreview, Session } from '../lib/types';
 import {
@@ -62,10 +62,6 @@ export function RoomLanding({ code }: RoomLandingProps) {
   }, [code]);
 
   useEffect(() => {
-    if (session) setAuthToken(session.token);
-  }, [session?.token]);
-
-  useEffect(() => {
     let cancelled = false;
     api
       .previewRoom(code)
@@ -97,7 +93,6 @@ export function RoomLanding({ code }: RoomLandingProps) {
         if (cancelled) return;
         if (err instanceof ApiError && err.status === 401) {
           clearSession();
-          setAuthToken('');
           setSession(null);
           setError('Your session expired. Sign in again to request access.');
         } else if (err instanceof ApiError && err.status === 404) {
@@ -107,7 +102,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
     return () => {
       cancelled = true;
     };
-  }, [session?.token, code]);
+  }, [session?.user.id, code]);
 
   /* Once approved, refresh the preview so the member list includes the new member. */
   const prevJoinStatus = useRef<string | null>(null);
@@ -148,7 +143,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
       cancelled = true;
       window.clearInterval(timer);
     };
-  }, [session?.token, join?.status, code]);
+  }, [session?.user.id, join?.status, code]);
 
   async function requestAccess() {
     setRequesting(true);
@@ -159,7 +154,6 @@ export function RoomLanding({ code }: RoomLandingProps) {
     } catch (err) {
       if (err instanceof ApiError && err.status === 401) {
         clearSession();
-        setAuthToken('');
         setSession(null);
         setError('Your session expired. Sign in again to request access.');
       } else {
