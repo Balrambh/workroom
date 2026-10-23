@@ -1,15 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomActions, RoomState } from '../lib/types';
-import type { VoiceController } from '../lib/useRoomVoice';
 import { clockTime, initial } from '../lib/format';
 import { BotIcon, ChatIcon, LightbulbIcon, SendIcon, TerminalIcon } from './Icons';
-import { VoiceDock } from './VoiceDock';
 
 interface ChatPanelProps {
   state: RoomState;
   actions: RoomActions;
-  voice: VoiceController;
-  connected: boolean;
 }
 
 const KIND_OPTIONS = [
@@ -45,7 +41,7 @@ function dayLabel(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export function ChatPanel({ state, actions, voice, connected }: ChatPanelProps) {
+export function ChatPanel({ state, actions }: ChatPanelProps) {
   const [text, setText] = useState(() => drafts.get(state.room.id) ?? '');
   const [kind, setKind] = useState<(typeof KIND_OPTIONS)[number]['value']>('chat');
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -99,24 +95,24 @@ export function ChatPanel({ state, actions, voice, connected }: ChatPanelProps) 
 
   return (
     <section className="chat">
-      <div className="chat-strip">
-        <span className="section-label">Discussion</span>
-        <span className="section-count">{state.messages.length} messages</span>
+      <div className="chat-head">
+        <span className="chat-head-title">
+          <ChatIcon size={14} />
+          Chat
+        </span>
+        <span className="chat-head-meta">
+          {state.messages.length === 0 ? 'No messages yet' : `${state.messages.length} messages`}
+        </span>
       </div>
-
-      <VoiceDock
-        voice={voice}
-        participants={state.voice ?? []}
-        me={state.me}
-        connected={connected}
-      />
 
       <div className="messages" ref={listRef} onScroll={handleScroll}>
         {state.messages.length === 0 ? (
           <div className="chat-empty">
-            <div className="empty-glyph">◆</div>
+            <span className="chat-empty-icon">
+              <ChatIcon size={18} />
+            </span>
             <h3>Start the conversation</h3>
-            <p>Drop an instruction, a suggestion, or just say hello. Agents in the room see it live.</p>
+            <p>Say hello, drop an instruction, or share a suggestion. Everyone here sees it live.</p>
           </div>
         ) : (
           <div className="messages-spacer" aria-hidden="true" />
@@ -175,7 +171,6 @@ export function ChatPanel({ state, actions, voice, connected }: ChatPanelProps) 
               className="composer-input"
               placeholder={activeOption.placeholder}
               aria-label="Message the room"
-              aria-describedby="composer-hint"
               rows={1}
               maxLength={4000}
               enterKeyHint="send"
@@ -207,9 +202,6 @@ export function ChatPanel({ state, actions, voice, connected }: ChatPanelProps) 
                 })}
               </div>
               <div className="composer-actions">
-                <span className="composer-hint" id="composer-hint">
-                  <kbd>Enter</kbd> send · <kbd>Shift</kbd>+<kbd>Enter</kbd> newline
-                </span>
                 <button
                   type="button"
                   className="btn btn-primary composer-send"

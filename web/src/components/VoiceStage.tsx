@@ -12,7 +12,7 @@ import {
   XIcon,
 } from './Icons';
 
-interface VoiceDockProps {
+interface VoiceStageProps {
   voice: VoiceController;
   participants: VoiceParticipant[];
   me: RoomState['me'];
@@ -46,7 +46,7 @@ function RemoteAudio({ stream, deafened, sinkId }: RemoteAudioProps) {
     void audio.setSinkId(sinkId).catch(() => undefined);
   }, [sinkId]);
 
-  return <audio ref={ref} className="voice-audio" autoPlay playsInline muted={deafened} />;
+  return <audio ref={ref} className="stage-audio" autoPlay playsInline muted={deafened} />;
 }
 
 function deviceName(device: MediaDeviceInfo, index: number, kind: 'mic' | 'speaker'): string {
@@ -54,21 +54,17 @@ function deviceName(device: MediaDeviceInfo, index: number, kind: 'mic' | 'speak
   return kind === 'mic' ? `Microphone ${index + 1}` : `Speaker ${index + 1}`;
 }
 
-function idleDetail(
-  roster: VoiceParticipant[],
-  connected: boolean,
-  viewer: boolean,
-): string {
+function stageDetail(roster: VoiceParticipant[], connected: boolean, viewer: boolean): string {
   if (viewer) return 'Viewers can follow chat and activity, but cannot join the call.';
-  if (!connected) return 'Reconnect to the room before starting voice.';
-  if (roster.length === 0) return 'Start a live call — your mic opens only after you join.';
+  if (!connected) return 'Reconnecting to the room before voice can start.';
+  if (roster.length === 0) return 'Your mic opens only after you join. Everyone can hop in.';
   const names = roster.map((participant) => participant.name);
-  if (names.length === 1) return `${names[0]} is in voice`;
-  if (names.length === 2) return `${names[0]} and ${names[1]} are in voice`;
-  return `${names.slice(0, 2).join(', ')} +${names.length - 2} more are in voice`;
+  if (names.length === 1) return `${names[0]} is on the stage. Jump in.`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are on the stage.`;
+  return `${names.slice(0, 2).join(', ')} +${names.length - 2} more are on the stage.`;
 }
 
-function VoiceTile({
+function StagePerson({
   participant,
   isSelf,
   speaking,
@@ -80,19 +76,19 @@ function VoiceTile({
   const silenced = participant.muted || participant.deafened;
   return (
     <div
-      className={`voice-tile ${speaking ? 'speaking' : ''} ${isSelf ? 'self' : ''}`}
+      className={`stage-person ${speaking ? 'speaking' : ''} ${isSelf ? 'self' : ''}`}
       role="listitem"
       title={`${participant.name}${isSelf ? ' (you)' : ''}${participant.deafened ? ' · deafened' : participant.muted ? ' · muted' : ''}`}
     >
-      <span className="voice-avatar">
-        {initial(participant.name)}
+      <span className="stage-avatar-wrap">
+        <span className="stage-avatar">{initial(participant.name)}</span>
         {silenced ? (
-          <span className="voice-mute-badge" aria-hidden="true">
-            {participant.deafened ? <HeadphonesOffIcon size={9} /> : <MicOffIcon size={9} />}
+          <span className="stage-mute-badge" aria-hidden="true">
+            {participant.deafened ? <HeadphonesOffIcon size={10} /> : <MicOffIcon size={10} />}
           </span>
         ) : null}
       </span>
-      <span className="voice-tile-name">
+      <span className="stage-person-name">
         {participant.name}
         {isSelf ? <em>you</em> : null}
       </span>
@@ -104,7 +100,7 @@ function VoiceTile({
   );
 }
 
-export function VoiceDock({ voice, participants, me, connected }: VoiceDockProps) {
+export function VoiceStage({ voice, participants, me, connected }: VoiceStageProps) {
   const [devicesOpen, setDevicesOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
@@ -130,6 +126,7 @@ export function VoiceDock({ voice, participants, me, connected }: VoiceDockProps
   const speakingSet = new Set(voice.speaking);
   const anyoneSpeaking = voice.speaking.length > 0;
   const viewer = me.role === 'viewer';
+  const empty = participantCount === 0;
 
   useEffect(() => {
     if (!voice.joined) setDevicesOpen(false);
@@ -152,11 +149,14 @@ export function VoiceDock({ voice, participants, me, connected }: VoiceDockProps
   }, [devicesOpen]);
 
   const joinDisabled = !connected || voice.connecting || viewer;
-  const joinLabel = voice.connecting ? 'Connecting…' : connected ? 'Join voice' : 'Offline';
+  const joinLabel = voice.connecting ? 'Connecting…' : !connected ? 'Reconnecting…' : 'Join voice';
 
   return (
-    <section className={`voice-dock ${voice.joined ? 'active' : ''}`} aria-label="Room voice">
-      <div className="voice-audio-sink" aria-hidden="true">
+    <section
+      className={`stage ${voice.joined ? 'is-live' : 'is-idle'} ${empty ? 'is-empty' : 'is-occupied'}`}
+      aria-label="Room voice"
+    >
+      <div className="stage-audio-sink" aria-hidden="true">
         {Object.entries(voice.remoteStreams).map(([peerId, stream]) => (
           <RemoteAudio
             key={peerId}
@@ -167,52 +167,87 @@ export function VoiceDock({ voice, participants, me, connected }: VoiceDockProps
         ))}
       </div>
 
-      {!voice.joined ? (
-        <div className="voice-idle">
-          <div className="voice-idle-row">
-            <span className={`voice-orb ${participantCount > 0 ? 'live' : ''}`}>
-              <HeadphonesIcon size={17} />
+      <header className="stage-head">
+        <div className="stage-title">
+          <span className="stage-title-icon">
+            <HeadphonesIcon size={14} />
+          </span>
+          <span className="stage-title-text">Voice stage</span>
+          {voice.joined ? (
+            <span className="stage-live-pill">
+              <span className="stage-pulse" aria-hidden="true" />
+              Live
             </span>
-            <div className="voice-idle-copy">
-              <span className="voice-title-line">
-                <strong>Room voice</strong>
-                {participantCount > 0 ? (
-                  <span className="voice-count-pill">
-                    <span className="voice-pulse" aria-hidden="true" />
-                    {participantCount} live
-                  </span>
-                ) : null}
+          ) : null}
+        </div>
+        <div className="stage-head-meta">
+          {participantCount > 0 ? (
+            <>
+              <span className="stage-count">
+                {participantCount} in the call
               </span>
-              <span className="voice-sub">{idleDetail(roster, connected, viewer)}</span>
-            </div>
-            {participantCount > 0 ? (
-              <div className="voice-stack" aria-hidden="true">
-                {roster.slice(0, 4).map((participant) => (
-                  <span
-                    key={participant.peerId}
-                    className={`voice-stack-avatar ${speakingSet.has(participant.peerId) ? 'speaking' : ''}`}
-                  >
-                    {initial(participant.name)}
-                  </span>
-                ))}
-                {roster.length > 4 ? (
-                  <span className="voice-stack-avatar more">+{roster.length - 4}</span>
-                ) : null}
-              </div>
-            ) : null}
-            <button
-              type="button"
-              className="voice-join"
-              onClick={voice.join}
-              disabled={joinDisabled}
-              title={viewer ? 'Viewers cannot join voice' : undefined}
-            >
-              <MicIcon size={14} />
-              {joinLabel}
-            </button>
+              <span className="stage-signal" data-active={anyoneSpeaking} aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </>
+          ) : (
+            <span className="stage-muted-label">Open stage</span>
+          )}
+        </div>
+      </header>
+
+      <div className={`stage-body ${empty ? 'is-empty' : ''}`}>
+        {empty ? (
+          <div className="stage-empty">
+            <span className={`stage-orb ${viewer ? 'dim' : ''}`}>
+              <HeadphonesIcon size={30} />
+            </span>
+            <h2>{viewer ? 'You are watching this room' : 'The stage is quiet'}</h2>
+            <p>{stageDetail(roster, connected, viewer)}</p>
+            {viewer ? null : (
+              <button
+                type="button"
+                className="stage-join stage-join-hero"
+                onClick={voice.join}
+                disabled={joinDisabled}
+                title={!connected ? 'Reconnecting to the room' : undefined}
+              >
+                {voice.connecting ? <span className="stage-join-spinner" aria-hidden="true" /> : <MicIcon size={16} />}
+                {joinLabel}
+              </button>
+            )}
           </div>
+        ) : (
+          <div
+            className={`stage-grid ${participantCount <= 4 ? 'few' : ''}`}
+            role="list"
+            aria-label="People on stage"
+          >
+            {displayRoster.map((participant) => {
+              const isSelf = participant.peerId === voice.selfPeerId;
+              return (
+                <StagePerson
+                  key={participant.peerId}
+                  participant={{
+                    ...participant,
+                    muted: isSelf ? voice.muted : participant.muted,
+                    deafened: isSelf ? voice.deafened : participant.deafened,
+                  }}
+                  isSelf={isSelf}
+                  speaking={speakingSet.has(isSelf ? 'self' : participant.peerId)}
+                />
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {voice.error || voice.joined || (!empty && !viewer) ? (
+        <footer className="stage-foot">
           {voice.error ? (
-            <div className="voice-error" role="alert">
+            <div className="stage-error" role="alert">
               <span>{voice.error}</span>
               <button
                 type="button"
@@ -224,67 +259,50 @@ export function VoiceDock({ voice, participants, me, connected }: VoiceDockProps
               </button>
             </div>
           ) : null}
-        </div>
-      ) : (
-        <div className="voice-live">
-          <div className="voice-live-head">
-            <div className="voice-live-title">
-              <span className="voice-live-pill">
-                <span className="voice-pulse" aria-hidden="true" />
-                Live
-              </span>
-              <span className="voice-meta">
-                {participantCount} in voice
-              </span>
-              <span className="voice-signal" data-active={anyoneSpeaking} aria-hidden="true">
-                <i />
-                <i />
-                <i />
-              </span>
-            </div>
 
-            <div className="voice-controls">
+          {voice.joined ? (
+            <div className="stage-controls">
               <button
                 type="button"
-                className={`voice-ctl ${voice.muted ? 'off' : ''}`}
+                className={`stage-ctl ${voice.muted ? 'off' : ''}`}
                 aria-label={voice.muted ? 'Unmute microphone' : 'Mute microphone'}
                 aria-pressed={voice.muted}
                 title={`${voice.muted ? 'Unmute' : 'Mute'} (Ctrl+Shift+M)`}
                 onClick={voice.toggleMute}
               >
-                {voice.muted ? <MicOffIcon size={15} /> : <MicIcon size={15} />}
+                {voice.muted ? <MicOffIcon size={17} /> : <MicIcon size={17} />}
               </button>
               <button
                 type="button"
-                className={`voice-ctl ${voice.deafened ? 'off' : ''}`}
+                className={`stage-ctl ${voice.deafened ? 'off' : ''}`}
                 aria-label={voice.deafened ? 'Undeafen audio' : 'Deafen audio'}
                 aria-pressed={voice.deafened}
                 title={voice.deafened ? 'Undeafen' : 'Deafen'}
                 onClick={voice.toggleDeafen}
               >
-                {voice.deafened ? <HeadphonesOffIcon size={15} /> : <HeadphonesIcon size={15} />}
+                {voice.deafened ? <HeadphonesOffIcon size={17} /> : <HeadphonesIcon size={17} />}
               </button>
-              <div className="voice-settings-wrap" ref={settingsRef}>
+              <div className="stage-devices-wrap" ref={settingsRef}>
                 <button
                   type="button"
-                  className={`voice-ctl ${devicesOpen ? 'on' : ''}`}
+                  className={`stage-ctl ${devicesOpen ? 'on' : ''}`}
                   aria-label="Voice device settings"
                   aria-expanded={devicesOpen}
                   title="Microphone and speaker"
                   onClick={() => setDevicesOpen((open) => !open)}
                 >
-                  <SlidersIcon size={15} />
+                  <SlidersIcon size={17} />
                 </button>
                 {devicesOpen ? (
-                  <div className="voice-devices">
-                    <div className="voice-devices-head">
+                  <div className="stage-devices">
+                    <div className="stage-devices-head">
                       <span>Voice settings</span>
-                      <span className="voice-devices-note">Mesh · encrypted</span>
+                      <span className="stage-devices-note">Mesh · encrypted</span>
                     </div>
-                    <label className="voice-device">
+                    <label className="stage-device">
                       <span>Microphone</span>
                       <select
-                        className="voice-select"
+                        className="stage-select"
                         value={voice.inputDeviceId}
                         onChange={(event) => voice.selectInputDevice(event.target.value)}
                       >
@@ -297,10 +315,10 @@ export function VoiceDock({ voice, participants, me, connected }: VoiceDockProps
                       </select>
                     </label>
                     {voice.canSelectOutput ? (
-                      <label className="voice-device">
+                      <label className="stage-device">
                         <span>Speaker</span>
                         <select
-                          className="voice-select"
+                          className="stage-select"
                           value={voice.outputDeviceId}
                           onChange={(event) => voice.selectOutputDevice(event.target.value)}
                         >
@@ -313,53 +331,48 @@ export function VoiceDock({ voice, participants, me, connected }: VoiceDockProps
                         </select>
                       </label>
                     ) : (
-                      <p className="voice-device-note">
+                      <p className="stage-device-note">
                         Speaker selection is available in Chrome and Edge. Audio uses your system
                         output here.
                       </p>
                     )}
-                    <p className="voice-device-note">
+                    <p className="stage-device-note">
                       Echo cancellation, noise suppression, and auto gain are on. Audio flows
                       directly between people.
                     </p>
                   </div>
                 ) : null}
               </div>
-              <span className="voice-ctl-sep" aria-hidden="true" />
-              <button
-                type="button"
-                className="voice-leave"
-                onClick={voice.leave}
-                title="Leave voice"
-              >
-                <PhoneOffIcon size={14} />
+              <span className="stage-ctl-sep" aria-hidden="true" />
+              <button type="button" className="stage-leave" onClick={voice.leave} title="Leave voice">
+                <PhoneOffIcon size={15} />
                 <span>Leave</span>
               </button>
             </div>
-          </div>
-
-          <div className="voice-roster" role="list" aria-label="People in voice">
-            {displayRoster.map((participant) => {
-              const isSelf = participant.peerId === voice.selfPeerId;
-              return (
-                <VoiceTile
-                  key={participant.peerId}
-                  participant={{
-                    ...participant,
-                    muted: isSelf ? voice.muted : participant.muted,
-                    deafened: isSelf ? voice.deafened : participant.deafened,
-                  }}
-                  isSelf={isSelf}
-                  speaking={speakingSet.has(isSelf ? 'self' : participant.peerId)}
-                />
-              );
-            })}
-            {displayRoster.length === 0 ? (
-              <span className="voice-roster-empty">Waiting for the room…</span>
-            ) : null}
-          </div>
-        </div>
-      )}
+          ) : (
+            <div className="stage-cta">
+              <div className="stage-cta-copy">
+                <strong>Join the call</strong>
+                <span>{stageDetail(roster, connected, viewer)}</span>
+              </div>
+              <button
+                type="button"
+                className="stage-join"
+                onClick={voice.join}
+                disabled={joinDisabled}
+                title={!connected ? 'Reconnecting to the room' : undefined}
+              >
+                {voice.connecting ? (
+                  <span className="stage-join-spinner" aria-hidden="true" />
+                ) : (
+                  <MicIcon size={16} />
+                )}
+                {joinLabel}
+              </button>
+            </div>
+          )}
+        </footer>
+      ) : null}
     </section>
   );
 }

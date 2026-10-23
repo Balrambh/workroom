@@ -1,10 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomActions, RoomState } from '../lib/types';
 import { useRoomVoice } from '../lib/useRoomVoice';
+import { initial, presenceMeta } from '../lib/format';
 import { ChatPanel } from './ChatPanel';
 import { RightPanel } from './RightPanel';
 import type { PanelTab } from './RightPanel';
-import { ActivityIcon, BranchIcon, CopyIcon, HashIcon, MenuIcon, UsersIcon, XIcon } from './Icons';
+import { VoiceStage } from './VoiceStage';
+import {
+  BotIcon,
+  BranchIcon,
+  CopyIcon,
+  HashIcon,
+  MenuIcon,
+  PanelsIcon,
+  UsersIcon,
+  XIcon,
+} from './Icons';
 
 interface RoomViewProps {
   state: RoomState;
@@ -30,13 +41,18 @@ export function RoomView({
     participants: state.voice ?? [],
   });
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const [panelTab, setPanelTab] = useState<PanelTab>('live');
+  const [panelTab, setPanelTab] = useState<PanelTab>('people');
   const pendingRequests = state.me.role === 'admin' ? state.joinRequests ?? [] : [];
   const pendingCount = pendingRequests.length;
   const [alertDismissed, setAlertDismissed] = useState(false);
   const previousPending = useRef(pendingCount);
   const requestNames = pendingRequests.slice(0, 2).map((request) => request.name).join(', ');
   const extraRequests = pendingCount > 2 ? ` +${pendingCount - 2}` : '';
+  const presenceByPrincipal = new Map(
+    state.presence.map((entry) => [`${entry.type}:${entry.id}`, entry]),
+  );
+  const headerPeople = state.members.slice(0, 4);
+  const extraPeople = Math.max(0, state.members.length - headerPeople.length);
 
   useEffect(() => {
     setDetailsOpen(false);
@@ -56,8 +72,8 @@ export function RoomView({
     return () => window.removeEventListener('keydown', onKey);
   }, [detailsOpen]);
 
-  function reviewRequests() {
-    setPanelTab('people');
+  function openPanel(tab: PanelTab) {
+    setPanelTab(tab);
     setDetailsOpen(true);
   }
 
@@ -76,19 +92,45 @@ export function RoomView({
         </button>
         <div className="room-head-main">
           <div className="room-title-line">
-            <span className={`mode-badge mode-${state.room.mode}`}>
-              {isCode ? <BranchIcon size={12} /> : <HashIcon size={12} />}
-              {isCode ? 'Code room' : 'Chat room'}
+            <span
+              className={`room-mark room-mark-${state.room.mode}`}
+              title={isCode ? 'Code room' : 'Chat room'}
+            >
+              {isCode ? <BranchIcon size={14} /> : <HashIcon size={14} />}
+              <span className="visually-hidden">{isCode ? 'Code room' : 'Chat room'}</span>
             </span>
             <h1>{state.room.name}</h1>
           </div>
           <p className="room-topic">{state.room.topic || 'No topic set for this room.'}</p>
         </div>
         <div className="room-head-actions">
+          <button
+            type="button"
+            className="room-people"
+            title="People in this room"
+            aria-label={`View ${state.members.length} people in this room`}
+            onClick={() => openPanel('people')}
+          >
+            {headerPeople.map((member) => {
+              const presence = presenceByPrincipal.get(`${member.type}:${member.id}`);
+              const tone = presence ? presenceMeta[presence.status].tone : 'gray';
+              return (
+                <span
+                  className={`room-person ${member.type === 'agent' ? 'agent' : ''}`}
+                  key={`${member.type}-${member.id}`}
+                >
+                  {member.type === 'agent' ? <BotIcon size={12} /> : initial(member.name)}
+                  <span className={`room-person-dot ${tone}`} aria-hidden="true" />
+                </span>
+              );
+            })}
+            {extraPeople > 0 ? <span className="room-people-more">+{extraPeople}</span> : null}
+          </button>
           {state.room.code ? (
             <button
               type="button"
               className="btn btn-ghost btn-small invite-btn"
+              aria-label="Copy room link"
               onClick={() =>
                 actions.copy(`${window.location.origin}/room/${state.room.code}`, 'Room link')
               }
@@ -100,24 +142,20 @@ export function RoomView({
           ) : null}
           <button
             type="button"
-            className="btn btn-ghost btn-small room-info-btn"
+            className="btn btn-ghost btn-small workspace-btn"
             aria-label={
               pendingCount > 0
-                ? `Open room details, ${pendingCount} join request${pendingCount === 1 ? '' : 's'} waiting`
-                : 'Open room details'
+                ? `Open workspace, ${pendingCount} join request${pendingCount === 1 ? '' : 's'} waiting`
+                : 'Open workspace'
             }
             aria-expanded={detailsOpen}
             aria-controls="room-details-panel"
             onClick={() => setDetailsOpen(true)}
           >
-            <ActivityIcon size={14} />
-            <span>Room info</span>
+            <PanelsIcon size={14} />
+            <span className="workspace-label">Workspace</span>
             {pendingCount > 0 ? <span className="info-alert-dot" aria-hidden="true" /> : null}
           </button>
-          <span className={`live-badge ${connected ? 'on' : 'off'}`}>
-            <span className="live-dot" />
-            {connected ? 'Live' : 'Reconnecting'}
-          </span>
         </div>
       </header>
 
@@ -135,7 +173,7 @@ export function RoomView({
               {extraRequests} · approve or decline in People
             </span>
           </div>
-          <button type="button" className="btn btn-alert btn-tiny" onClick={reviewRequests}>
+          <button type="button" className="btn btn-alert btn-tiny" onClick={() => openPanel('people')}>
             Review
           </button>
           <button
@@ -149,45 +187,40 @@ export function RoomView({
         </div>
       ) : null}
 
+      <div className="room-body">
+        <div className="room-main">
+          <VoiceStage
+            voice={voice}
+            participants={state.voice ?? []}
+            me={state.me}
+            connected={connected}
+          />
+        </div>
+        <ChatPanel state={state} actions={actions} key={state.room.id} />
+      </div>
+
       {detailsOpen ? (
         <button
           type="button"
           className="drawer-backdrop"
-          aria-label="Close room details"
+          aria-label="Close workspace"
           onClick={() => setDetailsOpen(false)}
         />
       ) : null}
 
-      <div className="room-body">
-        <ChatPanel
-          state={state}
-          actions={actions}
-          voice={voice}
-          connected={connected}
-          key={state.room.id}
-        />
-        <div
-          className={`room-aside ${detailsOpen ? 'open' : ''}`}
-          id="room-details-panel"
-        >
-          <div className="room-aside-head">
-            <span>Room details</span>
-            <button
-              type="button"
-              className="icon-btn"
-              aria-label="Close room details"
-              onClick={() => setDetailsOpen(false)}
-            >
-              <XIcon size={16} />
-            </button>
-          </div>
-          <RightPanel
-            state={state}
-            actions={actions}
-            tab={panelTab}
-            onTabChange={setPanelTab}
-          />
+      <div className={`room-aside ${detailsOpen ? 'open' : ''}`} id="room-details-panel">
+        <div className="room-aside-head">
+          <span>Workspace</span>
+          <button
+            type="button"
+            className="icon-btn"
+            aria-label="Close workspace"
+            onClick={() => setDetailsOpen(false)}
+          >
+            <XIcon size={16} />
+          </button>
         </div>
+        <RightPanel state={state} actions={actions} tab={panelTab} onTabChange={setPanelTab} />
       </div>
     </div>
   );

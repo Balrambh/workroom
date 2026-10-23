@@ -6,7 +6,7 @@ import { TasksPanel } from './TasksPanel';
 import { ReposPanel } from './ReposPanel';
 import { PeoplePanel } from './PeoplePanel';
 
-export type PanelTab = 'live' | 'tasks' | 'repos' | 'people';
+export type PanelTab = 'people' | 'tasks' | 'repos' | 'activity';
 
 interface RightPanelProps {
   state: RoomState;
@@ -21,16 +21,18 @@ export function RightPanel({ state, actions, tab, onTabChange }: RightPanelProps
   const pendingRequests = state.me.role === 'admin' ? state.joinRequests?.length ?? 0 : 0;
 
   const tabs: { id: PanelTab; label: string; icon: ReactNode; count: number | null }[] = [
-    { id: 'live', label: 'Live', icon: <ActivityIcon size={13} />, count: null },
-    { id: 'tasks', label: 'Tasks', icon: <CheckIcon size={13} />, count: openTasks },
-    ...(isCode ? [{ id: 'repos' as PanelTab, label: 'Repos', icon: <BranchIcon size={13} />, count: state.repos.length }] : []),
     { id: 'people', label: 'People', icon: <UsersIcon size={13} />, count: state.members.length },
+    { id: 'tasks', label: 'Tasks', icon: <CheckIcon size={13} />, count: openTasks },
+    ...(isCode
+      ? [{ id: 'repos' as PanelTab, label: 'Repos', icon: <BranchIcon size={13} />, count: state.repos.length }]
+      : []),
+    { id: 'activity', label: 'Activity', icon: <ActivityIcon size={13} />, count: null },
   ];
-  const activeTab = tabs.some((candidate) => candidate.id === tab) ? tab : 'live';
+  const activeTab = tabs.some((candidate) => candidate.id === tab) ? tab : 'people';
 
   return (
     <aside className="right-panel">
-      <div className="tabs" role="tablist" aria-label="Room panels">
+      <div className="tabs" role="tablist" aria-label="Workspace panels">
         {tabs.map((candidate) => (
           <button
             key={candidate.id}
@@ -57,10 +59,10 @@ export function RightPanel({ state, actions, tab, onTabChange }: RightPanelProps
         ))}
       </div>
 
-      {activeTab === 'live' ? <LiveFeed state={state} actions={actions} /> : null}
+      {activeTab === 'people' ? <PeoplePanel state={state} actions={actions} /> : null}
       {activeTab === 'tasks' ? <TasksPanel state={state} actions={actions} /> : null}
       {activeTab === 'repos' ? <ReposPanel state={state} actions={actions} /> : null}
-      {activeTab === 'people' ? <PeoplePanel state={state} actions={actions} /> : null}
+      {activeTab === 'activity' ? <LiveFeed state={state} actions={actions} /> : null}
     </aside>
   );
 }

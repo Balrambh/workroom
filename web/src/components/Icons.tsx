@@ -160,6 +160,15 @@ export const ActivityIcon = (props: IconProps) => (
   </Icon>
 );
 
+export const PanelsIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <rect x="4" y="4" width="6.5" height="6.5" rx="1.5" />
+    <rect x="13.5" y="4" width="6.5" height="6.5" rx="1.5" />
+    <rect x="4" y="13.5" width="6.5" height="6.5" rx="1.5" />
+    <rect x="13.5" y="13.5" width="6.5" height="6.5" rx="1.5" />
+  </Icon>
+);
+
 export const ArrowUpRightIcon = (props: IconProps) => (
   <Icon {...props}>
     <path d="M7 17 17 7M9 7h8v8" />

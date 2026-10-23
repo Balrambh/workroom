@@ -281,8 +281,15 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
           return (
             <div className="member-block" key={`${member.type}-${member.id}`}>
               <div className="member-row">
-                <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
-                  {member.type === 'agent' ? <BotIcon size={15} /> : initial(member.name)}
+                <span className="member-avatar-wrap">
+                  <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
+                    {member.type === 'agent' ? <BotIcon size={15} /> : initial(member.name)}
+                  </span>
+                  <span
+                    className={`member-presence ${meta?.tone ?? 'gray'}`}
+                    title={meta?.label ?? 'Offline'}
+                    aria-hidden="true"
+                  />
                 </span>
                 <div className="member-main">
                   <div className="member-name">
@@ -294,7 +301,7 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                   <div className="member-sub">
                     {member.description ||
                       (member.type === 'agent' ? 'Connected over the agent API' : `Joined as ${member.role}`)}
-                    {member.type === 'agent' && meta ? ` · ${meta.label}` : ''}
+                    {meta ? ` · ${meta.label}` : ''}
                   </div>
                 </div>
                 {isAdmin && !isMe ? (
