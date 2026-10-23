@@ -25,7 +25,7 @@ import { AuthScreen } from './components/AuthScreen';
 import { Sidebar } from './components/Sidebar';
 import { RoomView } from './components/RoomView';
 import { Modal } from './components/Modal';
-import { BranchIcon, HashIcon, PlusIcon } from './components/Icons';
+import { BranchIcon, HashIcon, MenuIcon, PlusIcon } from './components/Icons';
 
 function roomTarget(): string | null {
   const pathMatch = window.location.pathname.match(/^\/rooms?\/([A-Za-z0-9]+)/i);
@@ -54,6 +54,7 @@ export default function App({ initialCode }: AppProps = {}) {
   const [loadingRoom, setLoadingRoom] = useState(false);
   const [connected, setConnected] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  const [navOpen, setNavOpen] = useState(false);
 
   const [newRoomOpen, setNewRoomOpen] = useState(false);
   const [roomName, setRoomName] = useState('');
@@ -80,6 +81,15 @@ export default function App({ initialCode }: AppProps = {}) {
     if (!session) return;
     setAuthToken(session.token);
   }, [session]);
+
+  useEffect(() => {
+    if (!navOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setNavOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [navOpen]);
 
   /* Signing in from a shared room link returns the visitor to that room page. */
   useEffect(() => {
@@ -566,12 +576,19 @@ export default function App({ initialCode }: AppProps = {}) {
         activeId={activeId}
         user={session.user}
         connected={connected}
-        onSelect={setActiveId}
+        open={navOpen}
+        onClose={() => setNavOpen(false)}
+        onSelect={(roomId) => {
+          setActiveId(roomId);
+          setNavOpen(false);
+        }}
         onNewRoom={() => {
+          setNavOpen(false);
           setRoomError(null);
           setNewRoomOpen(true);
         }}
         onJoinRoom={() => {
+          setNavOpen(false);
           setJoinError(null);
           setJoinOpen(true);
         }}
@@ -580,10 +597,48 @@ export default function App({ initialCode }: AppProps = {}) {
           window.location.assign('/');
         }}
       />
+      {navOpen ? (
+        <button
+          type="button"
+          className="app-nav-backdrop"
+          aria-label="Close rooms menu"
+          onClick={() => setNavOpen(false)}
+        />
+      ) : null}
 
       <main className="main">
+        {!roomState ? (
+          <header className="mobile-head">
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Open rooms"
+              aria-expanded={navOpen}
+              aria-controls="app-sidebar"
+              onClick={() => setNavOpen(true)}
+            >
+              <MenuIcon size={18} />
+            </button>
+            <a className="mobile-head-brand" href="/">
+              <span className="brand-glyph">◆</span>
+              RoomForge
+            </a>
+            <span
+              className={`mobile-conn ${connected ? 'on' : 'off'}`}
+              title={connected ? 'Realtime connected' : 'Reconnecting'}
+            >
+              <span className="conn-dot" />
+            </span>
+          </header>
+        ) : null}
         {roomState ? (
-          <RoomView state={roomState} actions={actions} connected={connected} />
+          <RoomView
+            state={roomState}
+            actions={actions}
+            connected={connected}
+            navOpen={navOpen}
+            onOpenNav={() => setNavOpen(true)}
+          />
         ) : loadingRoom || !roomsLoaded ? (
           <div className="room-skeleton">
             <div className="skeleton-head" />
