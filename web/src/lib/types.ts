@@ -3,7 +3,21 @@ export type Role = 'admin' | 'member' | 'viewer';
 export type RoomMode = 'chat' | 'code';
 export type TaskStatus = 'todo' | 'doing' | 'review' | 'done';
 export type MessageKind = 'chat' | 'instruction' | 'suggestion';
-export type PresenceStatus = 'online' | 'working' | 'reviewing' | 'away' | 'offline';
+export type PresenceStatus =
+  | 'online'
+  | 'working'
+  | 'reviewing'
+  | 'away'
+  | 'offline'
+  | 'idle'
+  | 'waking'
+  | 'unreachable';
+export type DeliveryMode = 'socket' | 'trigger';
+
+export interface Mention {
+  type: PrincipalType;
+  id: string;
+}
 export type JoinRequestStatus = 'pending' | 'approved' | 'denied';
 export type JoinStatus = 'member' | 'pending' | 'denied' | 'none';
 
@@ -61,13 +75,16 @@ export interface Repo {
 export interface Message {
   id: string;
   roomId: string;
-  senderType: PrincipalType;
+  senderType: PrincipalType | 'system';
   senderId: string;
   senderName: string;
   senderRole: Role;
   kind: MessageKind;
   content: string;
   createdAt: string;
+  seq: number;
+  mentions: Mention[];
+  clientMessageId: string | null;
 }
 
 export interface Task {
@@ -111,6 +128,7 @@ export interface PresenceEntry {
   activity: string;
   taskId: string | null;
   lastSeen: string | null;
+  deliveryMode?: DeliveryMode;
 }
 
 export interface JoinRequest {
@@ -121,6 +139,8 @@ export interface JoinRequest {
   status: JoinRequestStatus;
   createdAt: string;
   decidedAt: string | null;
+  deliveryMode?: DeliveryMode;
+  triggerUrl?: string | null;
 }
 
 export interface RoomState {
@@ -191,8 +211,16 @@ export interface TaskPatch {
 }
 
 export interface CreateAgentResult {
-  agent: Member;
+  agent: Member & { deliveryMode?: DeliveryMode; triggerUrl?: string | null };
   token: string;
+  triggerSecret?: string;
+}
+
+export interface TriggerTestResult {
+  ok: boolean;
+  status: number;
+  ms: number;
+  error?: string;
 }
 
 export interface RoomActions {
@@ -206,7 +234,15 @@ export interface RoomActions {
   updateTask(taskId: string, patch: TaskPatch): Promise<void>;
   addRepo(input: { name: string; url: string; branch: string }): Promise<void>;
   deleteRepo(repoId: string): Promise<void>;
-  createAgent(input: { name: string; description: string; role: Role }): Promise<CreateAgentResult>;
+  createAgent(input: {
+    name: string;
+    description: string;
+    role: Role;
+    deliveryMode: DeliveryMode;
+    triggerUrl?: string;
+  }): Promise<CreateAgentResult>;
+  testTrigger(agentId: string): Promise<TriggerTestResult>;
+  rotateTriggerSecret(agentId: string): Promise<{ triggerSecret: string }>;
   setRole(member: Member, role: Role): Promise<void>;
   removeMember(member: Member): Promise<void>;
   approveJoinRequest(requestId: string): Promise<void>;

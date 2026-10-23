@@ -476,6 +476,14 @@ export default function App({ initialCode }: AppProps = {}) {
       return result;
     },
 
+    testTrigger(agentId: string) {
+      return api.testTrigger(agentId);
+    },
+
+    rotateTriggerSecret(agentId: string) {
+      return api.rotateTriggerSecret(agentId);
+    },
+
     async setRole(member: Member, role: Role) {
       const roomId = activeIdRef.current;
       if (!roomId) return;

@@ -2,9 +2,13 @@ import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { RawData } from 'ws';
 import { resolveToken } from './auth.js';
+import { WAKE_TIMEOUT_MS } from './wake-config.js';
+import { HttpError } from './errors.js';
 import * as store from './store.js';
 import type {
   Member,
+  Mention,
+  Message,
   MessageKind,
   PresenceEntry,
   PresenceStatus,
@@ -37,6 +41,9 @@ interface LivePresence {
 const clients = new Map<WebSocket, Client>();
 const pendingClients = new Map<WebSocket, PendingClient>();
 const presence = new Map<string, Map<string, LivePresence>>();
+const agentSockets = new Map<string, WebSocket>();
+const agentMessageTimes = new Map<string, number[]>();
+const pausedRooms = new Set<string>();
 
 const PRESENCE_STATUSES = new Set<PresenceStatus>(['online', 'working', 'reviewing', 'away', 'offline']);
 const MESSAGE_KINDS = new Set<MessageKind>(['chat', 'instruction', 'suggestion']);
@@ -85,6 +92,28 @@ function ensurePresence(roomId: string, principal: Principal): LivePresence {
   return entry;
 }
 
+export function isAgentConnected(agentId: string): boolean {
+  const socket = agentSockets.get(agentId);
+  return Boolean(socket && socket.readyState === WebSocket.OPEN);
+}
+
+/* Agent state is derived, never stored as presence: a live socket wins, then a
+ * delivered trigger (waking) or a failed one (unreachable), then sleep mode. */
+function agentPresenceStatus(agentId: string, entry: LivePresence | undefined): PresenceStatus {
+  if (isAgentConnected(agentId)) {
+    const status = entry?.status;
+    if (status && status !== 'offline' && status !== 'idle' && status !== 'waking' && status !== 'unreachable') {
+      return status;
+    }
+    return 'online';
+  }
+  const runtime = store.getAgentRuntime(agentId);
+  if (!runtime) return 'offline';
+  if (runtime.wakeState === 'waking') return 'waking';
+  if (runtime.wakeState === 'unreachable') return 'unreachable';
+  return runtime.deliveryMode === 'trigger' ? 'idle' : 'offline';
+}
+
 export function presenceList(roomId: string): PresenceEntry[] {
   const members = store.listMembers(roomId);
   const live = presence.get(roomId);
@@ -93,20 +122,28 @@ export function presenceList(roomId: string): PresenceEntry[] {
     reviewing: 1,
     online: 2,
     away: 3,
-    offline: 4,
+    idle: 4,
+    waking: 5,
+    unreachable: 6,
+    offline: 7,
   };
   return members
     .map((member) => {
       const entry = live?.get(principalKey(member.type, member.id));
+      const runtime = member.type === 'agent' ? store.getAgentRuntime(member.id) : undefined;
       return {
         type: member.type,
         id: member.id,
         name: member.name,
         role: member.role,
-        status: (entry?.status ?? 'offline') as PresenceStatus,
+        status:
+          member.type === 'agent'
+            ? agentPresenceStatus(member.id, entry)
+            : ((entry?.status ?? 'offline') as PresenceStatus),
         activity: entry?.activity ?? '',
         taskId: entry?.taskId ?? null,
-        lastSeen: entry?.lastSeen ?? null,
+        lastSeen: entry?.lastSeen ?? runtime?.lastSocketAt ?? null,
+        ...(member.type === 'agent' ? { deliveryMode: runtime?.deliveryMode ?? 'socket' } : {}),
       };
     })
     .sort((a, b) => rank[a.status] - rank[b.status] || a.name.localeCompare(b.name));
@@ -219,6 +256,111 @@ function markOfflineIfGone(roomId: string, principal: Principal): void {
   broadcastPresence(roomId);
 }
 
+/* --------------------------- message pipeline ---------------------------- */
+
+const AGENT_MESSAGES_PER_MINUTE = 20;
+const AGENT_RATE_WINDOW_MS = 60_000;
+const LOOP_WINDOW = 4;
+
+function collectMentions(roomId: string, content: string, explicit: Mention[]): Mention[] {
+  const members = store.listMembers(roomId);
+  const found = new Map<string, Mention>();
+
+  for (const member of members) {
+    const escaped = member.name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const pattern = new RegExp(`(^|[^\\p{L}\\p{N}_])@${escaped}(?=$|[^\\p{L}\\p{N}_])`, 'iu');
+    if (pattern.test(content)) found.set(principalKey(member.type, member.id), { type: member.type, id: member.id });
+  }
+
+  for (const mention of explicit) {
+    const member = members.find((candidate) => candidate.type === mention.type && candidate.id === mention.id);
+    if (member) found.set(principalKey(member.type, member.id), { type: member.type, id: member.id });
+  }
+
+  return [...found.values()];
+}
+
+function enforceAgentSend(roomId: string, agentId: string): void {
+  if (pausedRooms.has(roomId)) throw new HttpError(429, 'loop_guard');
+
+  const last = store.latestMessages(roomId, LOOP_WINDOW);
+  if (last.length === LOOP_WINDOW && last.every((message) => message.senderType === 'agent')) {
+    pausedRooms.add(roomId);
+    const notice = store.insertSystemMessage(roomId, 'Agents paused until a human replies.');
+    broadcast(roomId, { type: 'message.new', message: notice });
+    throw new HttpError(429, 'loop_guard');
+  }
+
+  const now = Date.now();
+  const recent = (agentMessageTimes.get(agentId) ?? []).filter((at) => now - at < AGENT_RATE_WINDOW_MS);
+  if (recent.length >= AGENT_MESSAGES_PER_MINUTE) throw new HttpError(429, 'rate_limited');
+  recent.push(now);
+  agentMessageTimes.set(agentId, recent);
+}
+
+/* A sleeping trigger-mode agent gets one wake event per room, then catches up
+ * over after_seq. A live socket always wins and never receives a trigger. */
+function routeMentions(roomId: string, message: Message): void {
+  const deliveredSince = new Date(Date.now() - WAKE_TIMEOUT_MS).toISOString();
+  for (const mention of message.mentions) {
+    if (mention.type !== 'agent') continue;
+    if (mention.id === message.senderId) continue;
+    if (isAgentConnected(mention.id)) continue;
+    const agent = store.getAgentTrigger(mention.id);
+    if (!agent || agent.deliveryMode !== 'trigger' || !agent.triggerUrl) continue;
+    if (store.hasLiveTriggerEvent(mention.id, roomId, deliveredSince)) continue;
+    store.createTriggerEvent(mention.id, roomId, message.id, message.seq);
+  }
+}
+
+export interface CreateRoomMessageInput {
+  roomId: string;
+  principal: Principal;
+  role: Role;
+  kind: MessageKind;
+  content: string;
+  clientMessageId?: string | null;
+  explicitMentions?: Mention[];
+}
+
+export function createRoomMessage(input: CreateRoomMessageInput): { message: Message; duplicate: boolean } {
+  const clientMessageId = input.clientMessageId?.trim() || null;
+  if (clientMessageId) {
+    const existing = store.findMessageByClientId(input.roomId, input.principal.id, clientMessageId);
+    if (existing) return { message: existing, duplicate: true };
+  }
+
+  if (input.principal.type === 'agent') enforceAgentSend(input.roomId, input.principal.id);
+
+  const mentions = collectMentions(input.roomId, input.content, input.explicitMentions ?? []);
+  const message = store.insertMessage(
+    input.roomId,
+    input.principal,
+    input.role,
+    input.kind,
+    input.content,
+    { mentions, clientMessageId },
+  );
+
+  if (input.principal.type === 'user') pausedRooms.delete(input.roomId);
+  broadcast(input.roomId, { type: 'message.new', message });
+
+  if (input.kind !== 'chat') {
+    const label = input.kind === 'instruction' ? 'instruction' : 'suggestion';
+    const activity = store.logActivity(
+      input.roomId,
+      input.principal,
+      input.kind,
+      `${input.principal.name} shared ${input.kind === 'instruction' ? 'an' : 'a'} ${label}: “${truncate(input.content)}”`,
+      { messageId: message.id },
+    );
+    broadcast(input.roomId, { type: 'activity.new', activity });
+  }
+
+  routeMentions(input.roomId, message);
+  return { message, duplicate: false };
+}
+
 function handleJoin(client: Client, roomId: string): void {
   const membership = store.getMembership(roomId, client.principal);
   if (!membership) {
@@ -260,19 +402,44 @@ function handleMessageSend(client: Client, payload: Record<string, unknown>): vo
     return;
   }
   const kind = MESSAGE_KINDS.has(payload.kind as MessageKind) ? (payload.kind as MessageKind) : 'chat';
-  const message = store.insertMessage(roomId, client.principal, membership.role, kind, content);
-  broadcast(roomId, { type: 'message.new', message });
+  const clientMessageId =
+    typeof payload.clientMessageId === 'string' && payload.clientMessageId.trim()
+      ? payload.clientMessageId.trim()
+      : null;
+  if (clientMessageId && clientMessageId.length > 100) {
+    send(client.ws, { type: 'error', message: 'clientMessageId is limited to 100 characters.' });
+    return;
+  }
+  const explicitMentions = Array.isArray(payload.mentions)
+    ? (payload.mentions as Record<string, unknown>[])
+        .filter((item) => item && (item.type === 'agent' || item.type === 'user') && typeof item.id === 'string')
+        .slice(0, 20)
+        .map((item) => ({ type: item.type as 'agent' | 'user', id: item.id as string }))
+    : [];
 
-  if (kind !== 'chat') {
-    const label = kind === 'instruction' ? 'instruction' : 'suggestion';
-    const activity = store.logActivity(
+  try {
+    createRoomMessage({
       roomId,
-      client.principal,
+      principal: client.principal,
+      role: membership.role,
       kind,
-      `${client.principal.name} shared ${kind === 'instruction' ? 'an' : 'a'} ${label}: “${truncate(content)}”`,
-      { messageId: message.id },
-    );
-    broadcast(roomId, { type: 'activity.new', activity });
+      content,
+      clientMessageId,
+      explicitMentions,
+    });
+  } catch (error) {
+    if (error instanceof HttpError && error.status === 429) {
+      send(client.ws, {
+        type: 'error',
+        error: error.message,
+        message:
+          error.message === 'loop_guard'
+            ? 'Agents are paused until a human replies.'
+            : 'Agent message rate limit reached (20 per minute).',
+      });
+      return;
+    }
+    send(client.ws, { type: 'error', message: 'Could not send the message.' });
   }
 }
 
@@ -328,10 +495,33 @@ function handleClientMessage(client: Client, raw: RawData): void {
 function registerClient(ws: WebSocket, principal: Principal): Client {
   const client: Client = { ws, principal, rooms: new Set(), alive: true };
   clients.set(ws, client);
-  send(ws, { type: 'ready', principal: { type: principal.type, id: principal.id, name: principal.name } });
 
   const agentRoomId = principal.type === 'agent' ? store.getAgentRoom(principal.id) : undefined;
-  if (agentRoomId) handleJoin(client, agentRoomId);
+
+  if (principal.type === 'agent') {
+    const existing = agentSockets.get(principal.id);
+    if (existing && existing !== ws) {
+      try {
+        existing.close(4008, 'replaced');
+      } catch {
+        // already closing
+      }
+    }
+    agentSockets.set(principal.id, ws);
+    store.markAgentSocket(principal.id);
+  }
+
+  send(ws, {
+    type: 'ready',
+    principal: { type: principal.type, id: principal.id, name: principal.name },
+    roomId: agentRoomId ?? null,
+    lastSeq: agentRoomId ? store.getRoomLastSeq(agentRoomId) : null,
+  });
+
+  if (agentRoomId) {
+    handleJoin(client, agentRoomId);
+    broadcastPresence(agentRoomId);
+  }
   return client;
 }
 
@@ -442,6 +632,10 @@ export function attachHub(server: HttpServer): void {
       const client = clients.get(ws);
       if (!client) return;
       clients.delete(ws);
+      if (client.principal.type === 'agent' && agentSockets.get(client.principal.id) === ws) {
+        agentSockets.delete(client.principal.id);
+        store.markAgentSocket(client.principal.id);
+      }
       for (const roomId of client.rooms) {
         markOfflineIfGone(roomId, client.principal);
       }

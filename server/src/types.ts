@@ -3,8 +3,24 @@ export type Role = 'admin' | 'member' | 'viewer';
 export type RoomMode = 'chat' | 'code';
 export type TaskStatus = 'todo' | 'doing' | 'review' | 'done';
 export type MessageKind = 'chat' | 'instruction' | 'suggestion';
-export type PresenceStatus = 'online' | 'working' | 'reviewing' | 'away' | 'offline';
+export type PresenceStatus =
+  | 'online'
+  | 'working'
+  | 'reviewing'
+  | 'away'
+  | 'offline'
+  | 'idle'
+  | 'waking'
+  | 'unreachable';
 export type JoinRequestStatus = 'pending' | 'approved' | 'denied';
+export type DeliveryMode = 'socket' | 'trigger';
+export type TriggerEventStatus = 'pending' | 'delivered' | 'failed';
+export type AgentWakeState = 'waking' | 'unreachable' | null;
+
+export interface Mention {
+  type: PrincipalType;
+  id: string;
+}
 
 export interface Principal {
   type: PrincipalType;
@@ -56,13 +72,16 @@ export interface Repo {
 export interface Message {
   id: string;
   roomId: string;
-  senderType: PrincipalType;
+  senderType: PrincipalType | 'system';
   senderId: string;
   senderName: string;
   senderRole: Role;
   kind: MessageKind;
   content: string;
   createdAt: string;
+  seq: number;
+  mentions: Mention[];
+  clientMessageId: string | null;
 }
 
 export interface Task {
@@ -106,6 +125,7 @@ export interface PresenceEntry {
   activity: string;
   taskId: string | null;
   lastSeen: string | null;
+  deliveryMode?: DeliveryMode;
 }
 
 export interface JoinRequest {
@@ -116,6 +136,20 @@ export interface JoinRequest {
   status: JoinRequestStatus;
   createdAt: string;
   decidedAt: string | null;
+  deliveryMode?: DeliveryMode;
+  triggerUrl?: string | null;
+}
+
+export interface AgentRuntime {
+  id: string;
+  roomId: string;
+  name: string;
+  deliveryMode: DeliveryMode;
+  triggerUrl: string | null;
+  hasSecret: boolean;
+  wakeState: AgentWakeState;
+  wakingSince: string | null;
+  lastSocketAt: string | null;
 }
 
 export interface RoomState {

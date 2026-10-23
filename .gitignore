@@ -3,3 +3,9 @@ dist/
 server/data/
 .env
 *.log
+
+# local agent credentials and cursors
+connector/.forge-credentials.json
+connector/.roomforge-credentials.json
+connector/.roomforge-state.json
+.roomforge-state.json

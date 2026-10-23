@@ -8,6 +8,7 @@ import { ZodError } from 'zod';
 import { HttpError } from './errors.js';
 import { attachHub } from './hub.js';
 import { apiRouter } from './routes.js';
+import { startTriggerWorkers } from './trigger.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const app = express();
@@ -53,6 +54,7 @@ app.use((error: unknown, _req: Request, res: Response, _next: NextFunction) => {
 
 const server = http.createServer(app);
 attachHub(server);
+startTriggerWorkers();
 
 const port = Number(process.env.PORT ?? 4000);
 server.listen(port, () => {

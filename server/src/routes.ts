@@ -1,6 +1,6 @@
 import { randomBytes } from 'node:crypto';
 import { Router } from 'express';
-import type { Request, Response } from 'express';
+import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import {
   hashAgentToken,
@@ -15,9 +15,38 @@ import type { AuthedRequest } from './auth.js';
 import { HttpError } from './errors.js';
 import * as hub from './hub.js';
 import * as store from './store.js';
-import type { Member, MessageKind, PresenceEntry, Principal, Role, Room, TaskStatus } from './types.js';
+import { decryptSecret, encryptSecret, newTriggerSecret, testTrigger, validateTriggerUrl } from './trigger.js';
+import type { DeliveryMode, Member, MessageKind, PresenceEntry, Principal, Role, Room, TaskStatus } from './types.js';
 
 const router = Router();
+
+/* Express 4 does not forward rejected promises from async handlers. */
+function wrap(handler: (req: Request, res: Response, next: NextFunction) => Promise<void>) {
+  return (req: Request, res: Response, next: NextFunction) => {
+    handler(req, res, next).catch(next);
+  };
+}
+
+const joinAttempts = new Map<string, number[]>();
+function checkJoinRate(ip: string, code: string): void {
+  const key = `${ip}:${code.toLowerCase()}`;
+  const now = Date.now();
+  const recent = (joinAttempts.get(key) ?? []).filter((at) => now - at < 60_000);
+  if (recent.length >= 5) throw new HttpError(429, 'Too many join requests for this room. Try again in a minute.');
+  recent.push(now);
+  joinAttempts.set(key, recent);
+}
+
+/* Admin endpoints can target any agent in a room they administer; an agent
+ * token only ever resolves to itself. */
+function agentTarget(req: AuthedRequest, principal: Principal): string {
+  if (principal.type === 'agent') return principal.id;
+  const body = z.object({ agentId: z.string().min(1) }).parse(req.body ?? {});
+  const roomId = store.getAgentRoom(body.agentId);
+  if (!roomId) throw new HttpError(404, 'Agent not found');
+  adminOrThrow(roomId, principal);
+  return body.agentId;
+}
 
 function principalOf(req: AuthedRequest): Principal {
   if (!req.principal) throw new HttpError(401, 'Unauthorized');
@@ -262,22 +291,42 @@ router.get('/rooms/public/:code', (req, res) => {
   });
 });
 
+const agentJoinSchema = z.object({
+  name: z.string().trim().min(1).max(40).optional(),
+  description: z.string().trim().max(200).optional().default(''),
+  deliveryMode: z.enum(['socket', 'trigger']).optional().default('socket'),
+  triggerUrl: z.string().trim().max(400).optional(),
+});
+
 /* Agents can ask to join any room they can see. This returns a pending ticket
- * and a socket URL that waits for an admin; no account or token is needed yet. */
-router.get('/agent/join/:code', (req, res) => {
+ * and a socket URL that waits for an admin; no account or token is needed yet.
+ * POST carries the delivery mode and wake URL; GET stays as a deprecated alias. */
+async function handleAgentJoin(req: Request, res: Response): Promise<void> {
   const code = req.params.code.trim();
   const room = store.getRoomByCode(code);
   if (!room) throw new HttpError(404, 'No room matches that code');
 
-  const query = z
-    .object({
-      name: z.string().trim().min(1).max(40).optional(),
-      description: z.string().trim().max(200).optional().default(''),
-    })
-    .parse(req.query);
-  const name = query.name ?? `Agent ${randomBytes(2).toString('hex').toUpperCase()}`;
-  const request = store.createJoinRequest(room.id, 'agent', name, query.description);
-  hub.broadcastJoinRequests(room.id);
+  const input = agentJoinSchema.parse(req.method === 'GET' ? req.query : req.body);
+  const name = input.name ?? `Agent ${randomBytes(2).toString('hex').toUpperCase()}`;
+  checkJoinRate(req.ip ?? req.socket.remoteAddress ?? 'unknown', room.code ?? code);
+
+  let triggerUrl: string | null = null;
+  if (input.deliveryMode === 'trigger') {
+    if (!input.triggerUrl) {
+      throw new HttpError(400, 'triggerUrl is required when deliveryMode is "trigger"');
+    }
+    triggerUrl = await validateTriggerUrl(input.triggerUrl);
+  }
+
+  let request = store.getPendingAgentJoinRequest(room.id, name);
+  const already = Boolean(request);
+  if (!request) {
+    request = store.createJoinRequest(room.id, 'agent', name, input.description, null, {
+      deliveryMode: input.deliveryMode as DeliveryMode,
+      triggerUrl,
+    });
+    hub.broadcastJoinRequests(room.id);
+  }
 
   const origin = publicOrigin(req);
   const api = `${origin}/api`;
@@ -287,6 +336,9 @@ router.get('/agent/join/:code', (req, res) => {
   previewHeaders(res);
   res.status(202).json({
     status: 'pending',
+    already,
+    deliveryMode: request.delivery_mode ?? 'socket',
+    triggerUrl: request.trigger_url ?? undefined,
     message: `Request sent to "${room.name}". An admin must approve it before you can chat.`,
     request: {
       key: request.request_key,
@@ -310,7 +362,10 @@ router.get('/agent/join/:code', (req, res) => {
     next: `Open ${socketUrl}. If you cannot hold it, poll ${pollUrl} until status is "approved".`,
     guide: `${origin}/agent-guide`,
   });
-});
+}
+
+router.get('/agent/join/:code', wrap(handleAgentJoin));
+router.post('/agent/join/:code', wrap(handleAgentJoin));
 
 /* Poll a pending agent request. A socket waiting on the same key receives the
  * same approval payload instantly; this route is the no-socket fallback. */
@@ -327,6 +382,8 @@ router.get('/agent/join/requests/:key', (req, res) => {
   if (request.status === 'pending') {
     res.json({
       status: 'pending',
+      deliveryMode: request.delivery_mode ?? 'socket',
+      triggerUrl: request.trigger_url ?? undefined,
       message: `Waiting for an admin to approve your request to join "${room.name}".`,
       request: {
         key: request.request_key,
@@ -366,6 +423,9 @@ router.get('/agent/join/requests/:key', (req, res) => {
   const membership = store.getMembership(room.id, principal);
   if (!membership) throw new HttpError(401, 'This agent is no longer a member of the room');
 
+  const secretEnc = store.takeJoinRequestSecretEnc(request.id);
+  const triggerSecret = secretEnc ? decryptSecret(secretEnc) : null;
+
   res.json({
     status: 'approved',
     ...agentBriefing(
@@ -374,6 +434,8 @@ router.get('/agent/join/requests/:key', (req, res) => {
       { id: principal.id, name: principal.name, role: membership.role },
       room,
     ),
+    token: request.agent_token,
+    ...(triggerSecret ? { triggerSecret } : {}),
     join: {
       status: 'approved',
       requestKey: request.request_key,
@@ -405,6 +467,74 @@ router.get('/me', (req, res) => {
   }
   res.json({ principal });
 });
+
+/* --------------------------- agent wake config --------------------------- */
+
+router.patch('/agent/me', wrap(async (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  if (principal.type !== 'agent') throw new HttpError(403, 'Only agents can update their delivery mode');
+  const body = z
+    .object({
+      deliveryMode: z.enum(['socket', 'trigger']).optional(),
+      triggerUrl: z.string().trim().max(400).nullable().optional(),
+    })
+    .parse(req.body);
+
+  const runtime = store.getAgentRuntime(principal.id);
+  if (!runtime) throw new HttpError(404, 'Agent not found');
+
+  const deliveryMode: DeliveryMode = body.deliveryMode ?? runtime.deliveryMode;
+  let triggerUrl = runtime.triggerUrl;
+  if (body.triggerUrl !== undefined) {
+    triggerUrl = body.triggerUrl ? await validateTriggerUrl(body.triggerUrl) : null;
+  }
+  if (deliveryMode === 'trigger' && !triggerUrl) {
+    throw new HttpError(400, 'triggerUrl is required when deliveryMode is "trigger"');
+  }
+
+  let triggerSecret: string | null = null;
+  let triggerSecretEnc: string | null = null;
+  if (deliveryMode === 'trigger' && !runtime.hasSecret) {
+    triggerSecret = newTriggerSecret();
+    triggerSecretEnc = encryptSecret(triggerSecret);
+  }
+
+  store.setAgentTriggerConfig(principal.id, {
+    deliveryMode,
+    triggerUrl,
+    ...(triggerSecretEnc ? { triggerSecretEnc } : {}),
+  });
+  hub.broadcastPresence(runtime.roomId);
+
+  res.json({
+    agent: {
+      id: runtime.id,
+      name: runtime.name,
+      deliveryMode,
+      triggerUrl,
+      hasSecret: runtime.hasSecret || Boolean(triggerSecretEnc),
+    },
+    ...(triggerSecret ? { triggerSecret } : {}),
+  });
+}));
+
+router.post('/agent/me/rotate-trigger-secret', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  const agentId = agentTarget(req as AuthedRequest, principal);
+  const runtime = store.getAgentRuntime(agentId);
+  if (!runtime) throw new HttpError(404, 'Agent not found');
+
+  const triggerSecret = newTriggerSecret();
+  store.setAgentTriggerConfig(agentId, { triggerSecretEnc: encryptSecret(triggerSecret) });
+  res.json({ agentId, triggerSecret });
+});
+
+router.post('/agent/me/test-trigger', wrap(async (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  const agentId = agentTarget(req as AuthedRequest, principal);
+  const result = await testTrigger(agentId);
+  res.json(result);
+}));
 
 /* --------------------------- human join flow ---------------------------- */
 
@@ -575,9 +705,18 @@ router.get('/rooms/:roomId/messages', (req, res) => {
   const query = z
     .object({
       before: z.string().optional(),
+      after_seq: z.coerce.number().int().min(0).optional(),
       limit: z.coerce.number().int().min(1).max(100).optional().default(80),
     })
     .parse(req.query);
+
+  if (query.after_seq !== undefined) {
+    res.json({
+      messages: store.listMessagesAfter(req.params.roomId, query.after_seq, Math.min(query.limit, 100)),
+      lastSeq: store.getRoomLastSeq(req.params.roomId),
+    });
+    return;
+  }
   res.json({ messages: store.listMessages(req.params.roomId, query.before, query.limit) });
 });
 
@@ -588,23 +727,24 @@ router.post('/rooms/:roomId/messages', (req, res) => {
     .object({
       content: z.string().trim().min(1).max(4000),
       kind: z.enum(['chat', 'instruction', 'suggestion']).optional().default('chat'),
+      clientMessageId: z.string().trim().max(100).optional(),
+      mentions: z
+        .array(z.object({ type: z.enum(['user', 'agent']), id: z.string().min(1) }))
+        .max(20)
+        .optional(),
     })
     .parse(req.body);
   const role = membershipOrThrow(req.params.roomId, principal).role;
-  const message = store.insertMessage(req.params.roomId, principal, role, body.kind as MessageKind, body.content);
-  hub.broadcast(req.params.roomId, { type: 'message.new', message });
-  if (body.kind !== 'chat') {
-    const label = body.kind === 'instruction' ? 'instruction' : 'suggestion';
-    const activity = store.logActivity(
-      req.params.roomId,
-      principal,
-      body.kind,
-      `${principal.name} shared ${body.kind === 'instruction' ? 'an' : 'a'} ${label}: “${body.content.slice(0, 90)}”`,
-      { messageId: message.id },
-    );
-    emitActivity(req.params.roomId, activity);
-  }
-  res.status(201).json(message);
+  const { message, duplicate } = hub.createRoomMessage({
+    roomId: req.params.roomId,
+    principal,
+    role,
+    kind: body.kind as MessageKind,
+    content: body.content,
+    clientMessageId: body.clientMessageId ?? null,
+    explicitMentions: body.mentions,
+  });
+  res.status(duplicate ? 200 : 201).json(message);
 });
 
 router.patch('/rooms/:roomId/presence', (req, res) => {
@@ -628,7 +768,7 @@ router.patch('/rooms/:roomId/presence', (req, res) => {
 
 /* ------------------------------- agents --------------------------------- */
 
-router.post('/rooms/:roomId/agents', (req, res) => {
+router.post('/rooms/:roomId/agents', wrap(async (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   adminOrThrow(req.params.roomId, principal);
   const body = z
@@ -636,8 +776,20 @@ router.post('/rooms/:roomId/agents', (req, res) => {
       name: z.string().trim().min(1).max(40),
       description: z.string().trim().max(200).optional().default(''),
       role: z.enum(['admin', 'member', 'viewer']).optional().default('member'),
+      deliveryMode: z.enum(['socket', 'trigger']).optional().default('socket'),
+      triggerUrl: z.string().trim().max(400).optional(),
     })
     .parse(req.body);
+
+  let triggerUrl: string | null = null;
+  let triggerSecret: string | null = null;
+  let triggerSecretEnc: string | null = null;
+  if (body.deliveryMode === 'trigger') {
+    if (!body.triggerUrl) throw new HttpError(400, 'triggerUrl is required when deliveryMode is "trigger"');
+    triggerUrl = await validateTriggerUrl(body.triggerUrl);
+    triggerSecret = newTriggerSecret();
+    triggerSecretEnc = encryptSecret(triggerSecret);
+  }
 
   const token = newAgentToken();
   const agent = store.createAgent(
@@ -647,6 +799,7 @@ router.post('/rooms/:roomId/agents', (req, res) => {
     body.role,
     hashAgentToken(token),
     principal.id,
+    { deliveryMode: body.deliveryMode as DeliveryMode, triggerUrl, triggerSecretEnc },
   );
   const activity = store.logActivity(
     req.params.roomId,
@@ -658,8 +811,12 @@ router.post('/rooms/:roomId/agents', (req, res) => {
   hub.broadcastMembers(req.params.roomId);
   hub.broadcastPresence(req.params.roomId);
   emitActivity(req.params.roomId, activity);
-  res.status(201).json({ agent, token });
-});
+  res.status(201).json({
+    agent: { ...agent, deliveryMode: body.deliveryMode, triggerUrl },
+    token,
+    ...(triggerSecret ? { triggerSecret } : {}),
+  });
+}));
 
 /* --------------------------- join approvals ----------------------------- */
 
@@ -679,6 +836,7 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
 
   let member: Member | null = null;
   let agentToken: string | null = null;
+  let triggerSecret: string | null = null;
 
   if (request.kind === 'user') {
     if (!request.user_id) throw new HttpError(400, 'This request has no user attached');
@@ -689,6 +847,11 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
     store.approveJoinRequest(request.id, principal.id);
     member = store.listMembers(room.id).find((candidate) => candidate.type === 'user' && candidate.id === user.id) ?? null;
   } else {
+    const deliveryMode: DeliveryMode = request.delivery_mode === 'trigger' ? 'trigger' : 'socket';
+    const triggerSecretEnc = deliveryMode === 'trigger' ? encryptSecret(newTriggerSecret()) : null;
+    if (deliveryMode === 'trigger') {
+      triggerSecret = triggerSecretEnc ? decryptSecret(triggerSecretEnc) : null;
+    }
     agentToken = newAgentToken();
     const agent = store.createAgent(
       room.id,
@@ -697,8 +860,9 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
       'member',
       hashAgentToken(agentToken),
       principal.id,
+      { deliveryMode, triggerUrl: request.trigger_url, triggerSecretEnc },
     );
-    store.approveJoinRequest(request.id, principal.id, agent.id, agentToken);
+    store.approveJoinRequest(request.id, principal.id, agent.id, agentToken, triggerSecretEnc);
     member = agent;
   }
 
@@ -712,6 +876,8 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
         { id: member.id, name: member.name, role: member.role },
         room,
       ),
+      token: agentToken,
+      ...(triggerSecret ? { triggerSecret } : {}),
       join: {
         status: 'approved',
         requestKey: request.request_key,
@@ -739,8 +905,18 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
       status: 'approved',
     },
     member: member
-      ? { type: member.type, id: member.id, name: member.name, role: member.role }
+      ? {
+          type: member.type,
+          id: member.id,
+          name: member.name,
+          role: member.role,
+          ...(member.type === 'agent'
+            ? { deliveryMode: request.delivery_mode ?? 'socket', triggerUrl: request.trigger_url ?? null }
+            : {}),
+        }
       : null,
+    ...(agentToken ? { token: agentToken } : {}),
+    ...(triggerSecret ? { triggerSecret } : {}),
   });
 });
 

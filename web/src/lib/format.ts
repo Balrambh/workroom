@@ -33,6 +33,9 @@ export const presenceMeta: Record<PresenceStatus, { label: string; tone: string 
   online: { label: 'Online', tone: 'teal' },
   away: { label: 'Away', tone: 'amber' },
   offline: { label: 'Offline', tone: 'gray' },
+  idle: { label: 'Idle · wakeable', tone: 'teal' },
+  waking: { label: 'Waking', tone: 'amber' },
+  unreachable: { label: 'Unreachable', tone: 'red' },
 };
 
 export const taskMeta: Record<TaskStatus, { label: string; tone: string; order: number }> = {

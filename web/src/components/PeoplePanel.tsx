@@ -1,7 +1,16 @@
 import { useState } from 'react';
 import type { FormEvent } from 'react';
-import type { CreateAgentResult, JoinRequest, Member, Role, RoomActions, RoomState } from '../lib/types';
-import { initial, roleMeta } from '../lib/format';
+import type {
+  CreateAgentResult,
+  DeliveryMode,
+  JoinRequest,
+  Member,
+  Role,
+  RoomActions,
+  RoomState,
+  TriggerTestResult,
+} from '../lib/types';
+import { initial, presenceMeta, roleMeta } from '../lib/format';
 import { Modal } from './Modal';
 import { ArrowUpRightIcon, BotIcon, CheckIcon, CopyIcon, PlusIcon, TrashIcon, XIcon } from './Icons';
 
@@ -28,11 +37,18 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
   const [agentName, setAgentName] = useState('');
   const [agentDescription, setAgentDescription] = useState('');
   const [agentRole, setAgentRole] = useState<Role>('member');
+  const [agentMode, setAgentMode] = useState<DeliveryMode>('socket');
+  const [agentTriggerUrl, setAgentTriggerUrl] = useState('');
   const [creating, setCreating] = useState(false);
   const [created, setCreated] = useState<CreateAgentResult | null>(null);
   const [deciding, setDeciding] = useState<string | null>(null);
+  const [testing, setTesting] = useState<string | null>(null);
+  const [testResults, setTestResults] = useState<Record<string, TriggerTestResult>>({});
+  const [rotated, setRotated] = useState<{ agentId: string; secret: string } | null>(null);
+  const [rotating, setRotating] = useState<string | null>(null);
 
   const pendingRequests = state.joinRequests ?? [];
+  const presenceById = new Map(state.presence.map((entry) => [`${entry.type}:${entry.id}`, entry]));
   const roomUrl = state.room.code
     ? `${window.location.origin}/room/${state.room.code}`
     : '';
@@ -41,7 +57,9 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
     ? `${window.location.origin}/api/agent/connect/${created.token}`
     : '';
   const agentPrompt = created
-    ? `You are the RoomForge agent "${created.agent.name}". Read ${connectUrl} and follow the briefing — open its live WebSocket so messages arrive instantly, then post "I'm connected." to the room.`
+    ? created.agent.deliveryMode === 'trigger'
+      ? `You are the RoomForge agent "${created.agent.name}", a sleeping trigger-mode agent. Start the wake connector with these values (secret shown once):\n\nROOMFORGE_BASE=${window.location.origin}/api\nROOMFORGE_TOKEN=${created.token}\nTRIGGER_SECRET=${created.triggerSecret ?? '<rotate to get one>'}\nAGENT_COMMAND="your-agent-command"\nPORT=8787\n\nYour wake URL is ${created.agent.triggerUrl ?? '<set one with PATCH /agent/me>'}. When someone mentions @${created.agent.name}, RoomForge POSTs a signed wake event; the connector opens the room socket, catches up, replies, then sleeps after IDLE_MS.`
+      : `You are the RoomForge agent "${created.agent.name}". Read ${connectUrl} and follow the briefing — open its live WebSocket so messages arrive instantly, then post "I'm connected." to the room.`
     : '';
 
   function closeAgentModal() {
@@ -50,7 +68,38 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
     setAgentName('');
     setAgentDescription('');
     setAgentRole('member');
+    setAgentMode('socket');
+    setAgentTriggerUrl('');
     setError(null);
+  }
+
+  async function testTrigger(agentId: string) {
+    setError(null);
+    setTesting(agentId);
+    try {
+      const result = await actions.testTrigger(agentId);
+      setTestResults((prev) => ({ ...prev, [agentId]: result }));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not test the trigger');
+    } finally {
+      setTesting(null);
+    }
+  }
+
+  async function rotateSecret(agent: Member) {
+    if (!window.confirm(`Rotate ${agent.name}'s trigger secret? The old secret stops working immediately.`)) {
+      return;
+    }
+    setError(null);
+    setRotating(agent.id);
+    try {
+      const { triggerSecret } = await actions.rotateTriggerSecret(agent.id);
+      setRotated({ agentId: agent.id, secret: triggerSecret });
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not rotate the secret');
+    } finally {
+      setRotating(null);
+    }
   }
 
   async function changeRole(member: Member, role: Role) {
@@ -98,6 +147,8 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
         name: agentName.trim(),
         description: agentDescription.trim(),
         role: agentRole,
+        deliveryMode: agentMode,
+        ...(agentMode === 'trigger' ? { triggerUrl: agentTriggerUrl.trim() } : {}),
       });
       setCreated(result);
     } catch (err) {
@@ -164,9 +215,18 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                 <div className="member-sub">
                   {request.description ||
                     (request.kind === 'agent'
-                      ? 'Wants a live agent connection'
+                      ? request.deliveryMode === 'trigger'
+                        ? 'Wakes when mentioned'
+                        : 'Wants a live agent connection'
                       : 'Wants to join this room')}
                 </div>
+                {request.kind === 'agent' ? (
+                  <div className="request-time">
+                    {request.deliveryMode === 'trigger'
+                      ? `Trigger mode · ${request.triggerUrl ?? 'no URL'}`
+                      : 'Socket mode · holds a live connection'}
+                  </div>
+                ) : null}
                 <div className="request-time">
                   {request.kind === 'agent'
                     ? 'Socket waiting · connects on approval'
@@ -214,46 +274,101 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
       <div className="member-list">
         {state.members.map((member) => {
           const isMe = member.type === state.me.type && member.id === state.me.id;
+          const presence = presenceById.get(`${member.type}:${member.id}`);
+          const mode = presence?.deliveryMode ?? 'socket';
+          const meta = presence ? presenceMeta[presence.status] : null;
+          const testResult = testResults[member.id];
           return (
-            <div className="member-row" key={`${member.type}-${member.id}`}>
-              <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
-                {member.type === 'agent' ? <BotIcon size={15} /> : initial(member.name)}
-              </span>
-              <div className="member-main">
-                <div className="member-name">
-                  {member.name}
-                  {isMe ? <span className="tag tag-gray">you</span> : null}
-                  {member.type === 'agent' ? <span className="tag tag-violet">agent</span> : null}
+            <div className="member-block" key={`${member.type}-${member.id}`}>
+              <div className="member-row">
+                <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
+                  {member.type === 'agent' ? <BotIcon size={15} /> : initial(member.name)}
+                </span>
+                <div className="member-main">
+                  <div className="member-name">
+                    {member.name}
+                    {isMe ? <span className="tag tag-gray">you</span> : null}
+                    {member.type === 'agent' ? <span className="tag tag-violet">agent</span> : null}
+                    {member.type === 'agent' ? <span className="tag tag-gray">{mode}</span> : null}
+                  </div>
+                  <div className="member-sub">
+                    {member.description ||
+                      (member.type === 'agent' ? 'Connected over the agent API' : `Joined as ${member.role}`)}
+                    {member.type === 'agent' && meta ? ` · ${meta.label}` : ''}
+                  </div>
                 </div>
-                <div className="member-sub">
-                  {member.description ||
-                    (member.type === 'agent' ? 'Connected over the agent API' : `Joined as ${member.role}`)}
-                </div>
+                {isAdmin && !isMe ? (
+                  <div className="member-actions">
+                    <select
+                      className="mini-select"
+                      value={member.role}
+                      onChange={(event) => changeRole(member, event.target.value as Role)}
+                      aria-label={`Role for ${member.name}`}
+                    >
+                      <option value="admin">Admin</option>
+                      <option value="member">Member</option>
+                      <option value="viewer">Viewer</option>
+                    </select>
+                    <button
+                      type="button"
+                      className="icon-btn danger"
+                      title={`Remove ${member.name}`}
+                      onClick={() => remove(member)}
+                    >
+                      <TrashIcon size={14} />
+                    </button>
+                  </div>
+                ) : (
+                  <span className={`tag tag-${roleMeta[member.role].tone}`}>{roleMeta[member.role].label}</span>
+                )}
               </div>
-              {isAdmin && !isMe ? (
-                <div className="member-actions">
-                  <select
-                    className="mini-select"
-                    value={member.role}
-                    onChange={(event) => changeRole(member, event.target.value as Role)}
-                    aria-label={`Role for ${member.name}`}
-                  >
-                    <option value="admin">Admin</option>
-                    <option value="member">Member</option>
-                    <option value="viewer">Viewer</option>
-                  </select>
-                  <button
-                    type="button"
-                    className="icon-btn danger"
-                    title={`Remove ${member.name}`}
-                    onClick={() => remove(member)}
-                  >
-                    <TrashIcon size={14} />
-                  </button>
+
+              {isAdmin && member.type === 'agent' ? (
+                <div className="agent-wake">
+                  <div className="agent-wake-actions">
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-tiny"
+                      disabled={mode !== 'trigger' || testing === member.id}
+                      title={
+                        mode === 'trigger'
+                          ? `Send a signed ping to ${presence?.name ?? member.name}`
+                          : 'This agent uses a permanent socket'
+                      }
+                      onClick={() => testTrigger(member.id)}
+                    >
+                      {testing === member.id ? 'Testing…' : 'Test trigger'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-tiny"
+                      disabled={rotating === member.id}
+                      onClick={() => rotateSecret(member)}
+                    >
+                      {rotating === member.id ? 'Rotating…' : 'Rotate secret'}
+                    </button>
+                  </div>
+                  {testResult ? (
+                    <span className={`agent-wake-result ${testResult.ok ? 'ok' : 'fail'}`}>
+                      {testResult.ok
+                        ? `Wake OK · ${testResult.status} · ${testResult.ms}ms`
+                        : `Failed${testResult.status ? ` · HTTP ${testResult.status}` : ''} · ${testResult.ms}ms${testResult.error ? ` · ${testResult.error}` : ''}`}
+                    </span>
+                  ) : null}
+                  {rotated?.agentId === member.id ? (
+                    <div className="token-box agent-wake-secret">
+                      <code>{rotated.secret}</code>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-small"
+                        onClick={() => actions.copy(rotated.secret, 'Trigger secret')}
+                      >
+                        <CopyIcon size={14} /> Copy
+                      </button>
+                    </div>
+                  ) : null}
                 </div>
-              ) : (
-                <span className={`tag tag-${roleMeta[member.role].tone}`}>{roleMeta[member.role].label}</span>
-              )}
+              ) : null}
             </div>
           );
         })}
@@ -335,6 +450,21 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                       </button>
                     </div>
                   </div>
+                  {created.triggerSecret ? (
+                    <div className="agent-run">
+                      <span className="section-label">Trigger secret — shown once</span>
+                      <div className="token-box">
+                        <code>{created.triggerSecret}</code>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-small"
+                          onClick={() => actions.copy(created.triggerSecret ?? '', 'Trigger secret')}
+                        >
+                          <CopyIcon size={14} /> Copy
+                        </button>
+                      </div>
+                    </div>
+                  ) : null}
                   <p className="hint">
                     If your agent cannot open links, send{' '}
                     <code>Authorization: Bearer &lt;key&gt;</code> to{' '}
@@ -379,8 +509,37 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                   <option value="admin">Admin — full room control</option>
                 </select>
               </label>
+              <label className="field">
+                <span>Delivery mode</span>
+                <select
+                  className="select"
+                  value={agentMode}
+                  onChange={(event) => setAgentMode(event.target.value as DeliveryMode)}
+                >
+                  <option value="socket">Socket — agent stays connected 24/7</option>
+                  <option value="trigger">Trigger — agent sleeps and wakes on @mention</option>
+                </select>
+              </label>
+              {agentMode === 'trigger' ? (
+                <label className="field">
+                  <span>Wake URL</span>
+                  <input
+                    className="input"
+                    value={agentTriggerUrl}
+                    onChange={(event) => setAgentTriggerUrl(event.target.value)}
+                    placeholder="https://your-agent.example.com/wake"
+                    required
+                  />
+                </label>
+              ) : null}
               {error ? <p className="form-error">{error}</p> : null}
-              <button type="submit" className="btn btn-primary btn-block" disabled={creating || !agentName.trim()}>
+              <button
+                type="submit"
+                className="btn btn-primary btn-block"
+                disabled={
+                  creating || !agentName.trim() || (agentMode === 'trigger' && !agentTriggerUrl.trim())
+                }
+              >
                 {creating ? 'Creating…' : 'Create agent'}
               </button>
             </form>

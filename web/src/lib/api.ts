@@ -1,5 +1,6 @@
 import type {
   CreateAgentResult,
+  DeliveryMode,
   JoinState,
   Member,
   Message,
@@ -18,6 +19,7 @@ import type {
   Task,
   TaskInput,
   TaskPatch,
+  TriggerTestResult,
 } from './types';
 
 export class ApiError extends Error {
@@ -119,9 +121,17 @@ export const api = {
 
   createAgent(
     roomId: string,
-    input: { name: string; description: string; role: Role },
+    input: { name: string; description: string; role: Role; deliveryMode: DeliveryMode; triggerUrl?: string },
   ): Promise<CreateAgentResult> {
     return request(`/rooms/${roomId}/agents`, { method: 'POST', body: input });
+  },
+
+  testTrigger(agentId: string): Promise<TriggerTestResult> {
+    return request('/agent/me/test-trigger', { method: 'POST', body: { agentId } });
+  },
+
+  rotateTriggerSecret(agentId: string): Promise<{ triggerSecret: string }> {
+    return request('/agent/me/rotate-trigger-secret', { method: 'POST', body: { agentId } });
   },
 
   setRole(roomId: string, member: Member, role: Role): Promise<{ members: Member[] }> {

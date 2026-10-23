@@ -2,9 +2,13 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { db } from './db.js';
 import type {
   Activity,
+  AgentRuntime,
+  AgentWakeState,
+  DeliveryMode,
   JoinRequest,
   JoinRequestStatus,
   Member,
+  Mention,
   Message,
   MessageKind,
   Principal,
@@ -16,6 +20,7 @@ import type {
   RoomSummary,
   Task,
   TaskStatus,
+  TriggerEventStatus,
 } from './types.js';
 
 type Row = Record<string, any>;
@@ -90,6 +95,13 @@ export function getRoomByCode(code: string): Room | undefined {
   const clean = code.trim();
   const row = db.prepare('SELECT * FROM rooms WHERE code = ? COLLATE NOCASE').get(clean) as Row | undefined;
   return row ? mapRoom(row) : undefined;
+}
+
+export function getRoomLastSeq(roomId: string): number {
+  const row = db.prepare('SELECT last_seq FROM rooms WHERE id = ?').get(roomId) as
+    | { last_seq: number }
+    | undefined;
+  return Number(row?.last_seq ?? 0);
 }
 
 export function createRoom(name: string, topic: string, mode: RoomMode, creator: Principal): Room {
@@ -226,11 +238,26 @@ export function createAgent(
   role: Role,
   tokenHash: string,
   createdBy: string,
+  options: { deliveryMode?: DeliveryMode; triggerUrl?: string | null; triggerSecretEnc?: string | null } = {},
 ): Member {
   const id = randomUUID();
   db.prepare(
-    'INSERT INTO agents (id, room_id, name, description, role, token_hash, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-  ).run(id, roomId, name, description, role, tokenHash, createdBy, nowIso());
+    `INSERT INTO agents (id, room_id, name, description, role, token_hash, created_by, created_at,
+                         delivery_mode, trigger_url, trigger_secret_enc)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    roomId,
+    name,
+    description,
+    role,
+    tokenHash,
+    createdBy,
+    nowIso(),
+    options.deliveryMode ?? 'socket',
+    options.triggerUrl ?? null,
+    options.triggerSecretEnc ?? null,
+  );
   addMember(roomId, { type: 'agent', id, name }, role);
   return listMembers(roomId).find((member) => member.type === 'agent' && member.id === id)!;
 }
@@ -244,6 +271,90 @@ export function getAgentRoom(agentId: string): string | undefined {
     | { room_id: string }
     | undefined;
   return row?.room_id;
+}
+
+export function getAgentRuntime(agentId: string): AgentRuntime | undefined {
+  const row = db
+    .prepare(
+      'SELECT id, room_id, name, delivery_mode, trigger_url, trigger_secret_enc, wake_state, waking_since, last_socket_at FROM agents WHERE id = ?',
+    )
+    .get(agentId) as Row | undefined;
+  if (!row) return undefined;
+  return {
+    id: row.id,
+    roomId: row.room_id,
+    name: row.name,
+    deliveryMode: row.delivery_mode === 'trigger' ? 'trigger' : 'socket',
+    triggerUrl: row.trigger_url ?? null,
+    hasSecret: Boolean(row.trigger_secret_enc),
+    wakeState: (row.wake_state as AgentWakeState) ?? null,
+    wakingSince: row.waking_since ?? null,
+    lastSocketAt: row.last_socket_at ?? null,
+  };
+}
+
+export function getAgentTrigger(
+  agentId: string,
+): { deliveryMode: DeliveryMode; triggerUrl: string | null; triggerSecretEnc: string | null; name: string } | undefined {
+  const row = db
+    .prepare('SELECT name, delivery_mode, trigger_url, trigger_secret_enc FROM agents WHERE id = ?')
+    .get(agentId) as Row | undefined;
+  if (!row) return undefined;
+  return {
+    name: row.name,
+    deliveryMode: row.delivery_mode === 'trigger' ? 'trigger' : 'socket',
+    triggerUrl: row.trigger_url ?? null,
+    triggerSecretEnc: row.trigger_secret_enc ?? null,
+  };
+}
+
+export function setAgentTriggerConfig(
+  agentId: string,
+  input: { deliveryMode?: DeliveryMode; triggerUrl?: string | null; triggerSecretEnc?: string | null },
+): void {
+  const sets: string[] = [];
+  const values: (string | null)[] = [];
+  if (input.deliveryMode !== undefined) {
+    sets.push('delivery_mode = ?');
+    values.push(input.deliveryMode);
+  }
+  if (input.triggerUrl !== undefined) {
+    sets.push('trigger_url = ?');
+    values.push(input.triggerUrl);
+  }
+  if (input.triggerSecretEnc !== undefined) {
+    sets.push('trigger_secret_enc = ?');
+    values.push(input.triggerSecretEnc);
+  }
+  if (!sets.length) return;
+  db.prepare(`UPDATE agents SET ${sets.join(', ')} WHERE id = ?`).run(...values, agentId);
+}
+
+export function markAgentSocket(agentId: string): void {
+  db.prepare(
+    'UPDATE agents SET last_socket_at = ?, wake_state = NULL, waking_since = NULL WHERE id = ?',
+  ).run(nowIso(), agentId);
+}
+
+export function setAgentWakeState(
+  agentId: string,
+  state: AgentWakeState,
+  options: { wakingSince?: string | null } = {},
+): void {
+  const wakingSince = state === 'waking' ? (options.wakingSince ?? nowIso()) : null;
+  db.prepare('UPDATE agents SET wake_state = ?, waking_since = ? WHERE id = ?').run(
+    state,
+    wakingSince,
+    agentId,
+  );
+}
+
+export function listAgentsAwaitingSocket(olderThan: string): { id: string; room_id: string; name: string }[] {
+  return db
+    .prepare(
+      "SELECT id, room_id, name FROM agents WHERE wake_state = 'waking' AND waking_since IS NOT NULL AND waking_since <= ?",
+    )
+    .all(olderThan) as { id: string; room_id: string; name: string }[];
 }
 
 /* ---------------------------- join requests ----------------------------- */
@@ -262,6 +373,10 @@ export interface JoinRequestRow {
   decided_by: string | null;
   decided_at: string | null;
   created_at: string;
+  delivery_mode: DeliveryMode;
+  trigger_url: string | null;
+  trigger_secret_enc: string | null;
+  trigger_secret_returned: number;
 }
 
 function mapJoinRequest(row: Row): JoinRequest {
@@ -273,6 +388,8 @@ function mapJoinRequest(row: Row): JoinRequest {
     status: row.status as JoinRequestStatus,
     createdAt: row.created_at,
     decidedAt: row.decided_at ?? null,
+    deliveryMode: (row.delivery_mode as DeliveryMode) ?? 'socket',
+    triggerUrl: row.trigger_url ?? null,
   };
 }
 
@@ -300,6 +417,7 @@ export function createJoinRequest(
   name: string,
   description: string,
   userId: string | null = null,
+  options: { deliveryMode?: DeliveryMode; triggerUrl?: string | null } = {},
 ): JoinRequestRow {
   let key = `jr_${randomBytes(18).toString('base64url')}`;
   while (db.prepare('SELECT 1 FROM room_join_requests WHERE request_key = ?').get(key)) {
@@ -307,10 +425,30 @@ export function createJoinRequest(
   }
   const id = randomUUID();
   db.prepare(
-    `INSERT INTO room_join_requests (id, room_id, kind, request_key, user_id, name, description, status, created_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)`,
-  ).run(id, roomId, kind, key, userId, name, description, nowIso());
+    `INSERT INTO room_join_requests (id, room_id, kind, request_key, user_id, name, description, status, created_at,
+                                     delivery_mode, trigger_url)
+     VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?)`,
+  ).run(
+    id,
+    roomId,
+    kind,
+    key,
+    userId,
+    name,
+    description,
+    nowIso(),
+    options.deliveryMode ?? 'socket',
+    options.triggerUrl ?? null,
+  );
   return getJoinRequestById(id)!;
+}
+
+export function getPendingAgentJoinRequest(roomId: string, name: string): JoinRequestRow | undefined {
+  return db
+    .prepare(
+      "SELECT * FROM room_join_requests WHERE room_id = ? AND kind = 'agent' AND status = 'pending' AND name = ? COLLATE NOCASE ORDER BY created_at DESC LIMIT 1",
+    )
+    .get(roomId, name) as JoinRequestRow | undefined;
 }
 
 export function listPendingJoinRequests(roomId: string): JoinRequest[] {
@@ -325,12 +463,23 @@ export function approveJoinRequest(
   decidedBy: string,
   agentId: string | null = null,
   agentToken: string | null = null,
+  triggerSecretEnc: string | null = null,
 ): void {
   db.prepare(
     `UPDATE room_join_requests
-     SET status = 'approved', decided_by = ?, decided_at = ?, agent_id = ?, agent_token = ?
+     SET status = 'approved', decided_by = ?, decided_at = ?, agent_id = ?, agent_token = ?,
+         trigger_secret_enc = ?
      WHERE id = ? AND status = 'pending'`,
-  ).run(decidedBy, nowIso(), agentId, agentToken, id);
+  ).run(decidedBy, nowIso(), agentId, agentToken, triggerSecretEnc, id);
+}
+
+export function takeJoinRequestSecretEnc(id: string): string | null {
+  const row = db
+    .prepare('SELECT trigger_secret_enc, trigger_secret_returned FROM room_join_requests WHERE id = ?')
+    .get(id) as { trigger_secret_enc: string | null; trigger_secret_returned: number } | undefined;
+  if (!row?.trigger_secret_enc || row.trigger_secret_returned) return null;
+  db.prepare('UPDATE room_join_requests SET trigger_secret_returned = 1 WHERE id = ?').run(id);
+  return row.trigger_secret_enc;
 }
 
 export function denyJoinRequest(id: string, decidedBy: string): void {
@@ -400,48 +549,103 @@ function mapMessage(row: Row): Message {
   return {
     id: row.id,
     roomId: row.room_id,
-    senderType: row.sender_type as PrincipalType,
+    senderType: row.sender_type as PrincipalType | 'system',
     senderId: row.sender_id,
     senderName: row.sender_name,
     senderRole: row.sender_role as Role,
     kind: row.kind as MessageKind,
     content: row.content,
     createdAt: row.created_at,
+    seq: Number(row.seq ?? 0),
+    mentions: row.mentions ? (JSON.parse(row.mentions) as Mention[]) : [],
+    clientMessageId: row.client_message_id ?? null,
   };
 }
 
+export interface InsertMessageOptions {
+  mentions?: Mention[];
+  clientMessageId?: string | null;
+  senderType?: PrincipalType | 'system';
+}
+
+/* The sequence bump and the insert share one transaction so seq stays gap-free
+ * and strictly increasing per room. */
 export function insertMessage(
   roomId: string,
   sender: Principal,
   senderRole: Role,
   kind: MessageKind,
   content: string,
+  options: InsertMessageOptions = {},
 ): Message {
-  const message: Message = {
-    id: randomUUID(),
-    roomId,
-    senderType: sender.type,
-    senderId: sender.id,
-    senderName: sender.name,
-    senderRole,
-    kind,
-    content,
-    createdAt: nowIso(),
-  };
-  db.prepare(
-    'INSERT INTO messages (id, room_id, sender_type, sender_id, sender_name, sender_role, kind, content, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
-  ).run(
-    message.id,
-    message.roomId,
-    message.senderType,
-    message.senderId,
-    message.senderName,
-    message.senderRole,
-    message.kind,
-    message.content,
-    message.createdAt,
-  );
-  return message;
+  const id = randomUUID();
+  const createdAt = nowIso();
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const row = db
+      .prepare('UPDATE rooms SET last_seq = last_seq + 1 WHERE id = ? RETURNING last_seq')
+      .get(roomId) as { last_seq: number } | undefined;
+    if (!row) throw new Error('Room not found');
+    const seq = Number(row.last_seq);
+    db.prepare(
+      `INSERT INTO messages (id, room_id, sender_type, sender_id, sender_name, sender_role, kind, content,
+                             created_at, seq, mentions, client_message_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      id,
+      roomId,
+      options.senderType ?? sender.type,
+      sender.id,
+      sender.name,
+      senderRole,
+      kind,
+      content,
+      createdAt,
+      seq,
+      JSON.stringify(options.mentions ?? []),
+      options.clientMessageId ?? null,
+    );
+    db.exec('COMMIT');
+    return {
+      id,
+      roomId,
+      senderType: options.senderType ?? sender.type,
+      senderId: sender.id,
+      senderName: sender.name,
+      senderRole,
+      kind,
+      content,
+      createdAt,
+      seq,
+      mentions: options.mentions ?? [],
+      clientMessageId: options.clientMessageId ?? null,
+    };
+  } catch (error) {
+    db.exec('ROLLBACK');
+    throw error;
+  }
+}
+
+export function insertSystemMessage(roomId: string, content: string): Message {
+  return insertMessage(roomId, { type: 'agent', id: 'system', name: 'System' }, 'member', 'chat', content, {
+    senderType: 'system',
+  });
+}
+
+export function getMessageById(messageId: string): Message | undefined {
+  const row = db.prepare('SELECT * FROM messages WHERE id = ?').get(messageId) as Row | undefined;
+  return row ? mapMessage(row) : undefined;
+}
+
+export function findMessageByClientId(
+  roomId: string,
+  senderId: string,
+  clientMessageId: string,
+): Message | undefined {
+  const row = db
+    .prepare('SELECT * FROM messages WHERE room_id = ? AND sender_id = ? AND client_message_id = ?')
+    .get(roomId, senderId, clientMessageId) as Row | undefined;
+  return row ? mapMessage(row) : undefined;
 }
 
 export function listMessages(roomId: string, before?: string, limit = 80): Message[] {
@@ -453,6 +657,116 @@ export function listMessages(roomId: string, before?: string, limit = 80): Messa
         .prepare('SELECT * FROM messages WHERE room_id = ? ORDER BY created_at DESC LIMIT ?')
         .all(roomId, limit) as Row[]);
   return rows.map(mapMessage).reverse();
+}
+
+export function listMessagesAfter(roomId: string, afterSeq: number, limit = 100): Message[] {
+  const rows = db
+    .prepare('SELECT * FROM messages WHERE room_id = ? AND seq > ? ORDER BY seq ASC LIMIT ?')
+    .all(roomId, afterSeq, limit) as Row[];
+  return rows.map(mapMessage);
+}
+
+export function latestMessages(roomId: string, limit: number): Message[] {
+  const rows = db
+    .prepare('SELECT * FROM messages WHERE room_id = ? ORDER BY seq DESC LIMIT ?')
+    .all(roomId, limit) as Row[];
+  return rows.map(mapMessage);
+}
+
+/* --------------------------- trigger events ----------------------------- */
+
+export interface TriggerEventRow {
+  id: string;
+  agent_id: string;
+  room_id: string;
+  message_id: string;
+  seq: number;
+  status: TriggerEventStatus;
+  attempts: number;
+  next_attempt_at: string;
+  last_error: string | null;
+  created_at: string;
+  delivered_at: string | null;
+}
+
+function mapTriggerEvent(row: Row): TriggerEventRow {
+  return {
+    id: row.id,
+    agent_id: row.agent_id,
+    room_id: row.room_id,
+    message_id: row.message_id,
+    seq: Number(row.seq),
+    status: row.status as TriggerEventStatus,
+    attempts: Number(row.attempts),
+    next_attempt_at: row.next_attempt_at,
+    last_error: row.last_error ?? null,
+    created_at: row.created_at,
+    delivered_at: row.delivered_at ?? null,
+  };
+}
+
+export function createTriggerEvent(
+  agentId: string,
+  roomId: string,
+  messageId: string,
+  seq: number,
+): TriggerEventRow {
+  const id = `evt_${randomBytes(12).toString('hex')}`;
+  const createdAt = nowIso();
+  db.prepare(
+    `INSERT INTO trigger_events (id, agent_id, room_id, message_id, seq, status, attempts, next_attempt_at, created_at)
+     VALUES (?, ?, ?, ?, ?, 'pending', 0, ?, ?)`,
+  ).run(id, agentId, roomId, messageId, seq, createdAt, createdAt);
+  return getTriggerEvent(id)!;
+}
+
+export function getTriggerEvent(id: string): TriggerEventRow | undefined {
+  const row = db.prepare('SELECT * FROM trigger_events WHERE id = ?').get(id) as Row | undefined;
+  return row ? mapTriggerEvent(row) : undefined;
+}
+
+export function hasLiveTriggerEvent(agentId: string, roomId: string, deliveredSince: string): boolean {
+  const row = db
+    .prepare(
+      `SELECT 1 FROM trigger_events
+       WHERE agent_id = ? AND room_id = ?
+         AND (status = 'pending' OR (status = 'delivered' AND delivered_at IS NOT NULL AND delivered_at > ?))
+       LIMIT 1`,
+    )
+    .get(agentId, roomId, deliveredSince);
+  return Boolean(row);
+}
+
+export function listDueTriggerEvents(now: string, limit = 20): TriggerEventRow[] {
+  const rows = db
+    .prepare(
+      "SELECT * FROM trigger_events WHERE status = 'pending' AND next_attempt_at <= ? ORDER BY next_attempt_at ASC LIMIT ?",
+    )
+    .all(now, limit) as Row[];
+  return rows.map(mapTriggerEvent);
+}
+
+export function markTriggerDelivered(id: string): void {
+  db.prepare(
+    "UPDATE trigger_events SET status = 'delivered', attempts = attempts + 1, delivered_at = ?, last_error = NULL WHERE id = ?",
+  ).run(nowIso(), id);
+}
+
+export function markTriggerFailure(
+  id: string,
+  attempts: number,
+  nextAttemptAt: string | null,
+  error: string,
+): void {
+  if (nextAttemptAt) {
+    db.prepare(
+      "UPDATE trigger_events SET attempts = ?, next_attempt_at = ?, last_error = ? WHERE id = ?",
+    ).run(attempts, nextAttemptAt, error.slice(0, 500), id);
+  } else {
+    db.prepare(
+      "UPDATE trigger_events SET status = 'failed', attempts = ?, last_error = ? WHERE id = ?",
+    ).run(attempts, error.slice(0, 500), id);
+  }
 }
 
 /* -------------------------------- tasks --------------------------------- */

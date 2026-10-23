@@ -1267,6 +1267,11 @@ button {
   background: #4b5b6d;
 }
 
+.status-dot.red {
+  background: #f87171;
+  box-shadow: 0 0 6px rgba(248, 113, 113, 0.4);
+}
+
 .presence-row .avatar {
   margin-top: 2px;
 }
@@ -1328,6 +1333,10 @@ button {
 
 .presence-state.amber {
   color: var(--amber);
+}
+
+.presence-state.red {
+  color: #f87171;
 }
 
 .status-editor {
@@ -1890,8 +1899,51 @@ button {
   border-bottom: 1px dashed var(--border-soft);
 }
 
-.member-row:last-child {
+.member-block {
+  border-bottom: 1px dashed var(--border-soft);
+}
+
+.member-block:last-child {
   border-bottom: 0;
+}
+
+.member-block .member-row {
+  border-bottom: 0;
+}
+
+.agent-wake {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 0 0 8px 33px;
+}
+
+.agent-wake-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.agent-wake-result {
+  font-family: var(--mono);
+  font-size: 9.5px;
+}
+
+.agent-wake-result.ok {
+  color: var(--accent);
+}
+
+.agent-wake-result.fail {
+  color: #f87171;
+}
+
+.agent-wake-secret {
+  flex-basis: 100%;
+}
+
+.agent-wake-secret code {
+  font-size: 10px;
+  overflow-wrap: anywhere;
 }
 
 .member-main {
