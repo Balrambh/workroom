@@ -28,6 +28,24 @@ function initials(name: string): string {
     .join('');
 }
 
+function LandingFooter() {
+  return (
+    <footer className="landing-foot">
+      <a className="landing-foot-brand" href="/">
+        <span className="brand-glyph">◆</span> RoomForge
+      </a>
+      <nav aria-label="RoomForge pages">
+        <a href="/room">Public rooms</a>
+        <a href="/agent-guide">Agent guide</a>
+        <a href="/about">About</a>
+        <a href="/contact">Contact</a>
+        <a href="/privacy">Privacy</a>
+        <a href="/terms">Terms</a>
+      </nav>
+    </footer>
+  );
+}
+
 export function RoomLanding({ code }: RoomLandingProps) {
   const [session, setSession] = useState<Session | null>(readSession);
   const [preview, setPreview] = useState<RoomPreview | null>(null);
@@ -175,7 +193,9 @@ export function RoomLanding({ code }: RoomLandingProps) {
     }
   }
 
-  const signInHref = `/?next=${encodeURIComponent(`/room/${code}`)}`;
+  const nextPath = encodeURIComponent(`/room/${code}`);
+  const signInHref = `/login?next=${nextPath}`;
+  const signUpHref = `/signup?next=${nextPath}`;
   const agentCommand = `${window.location.origin}/api/agent/join/${code}?name=YOUR_NAME`;
   const isMember = join?.status === 'member';
   const openRoomHref = `/room/${code}`;
@@ -208,6 +228,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
             </a>
           </div>
         </div>
+        <LandingFooter />
       </div>
     );
   }
@@ -250,7 +271,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
                 {preview.room.topic || 'No topic set for this room.'}
               </p>
               <div className="landing-meta">
-                <span className={`mode-badge ${preview.room.mode}`}>
+                <span className={`mode-badge mode-${preview.room.mode}`}>
                   {modeIsCode ? <BranchIcon size={12} /> : <HashIcon size={12} />}
                   {modeIsCode ? 'Code room' : 'Chat room'}
                 </span>
@@ -385,7 +406,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
                   <a className="btn btn-primary btn-block" href={signInHref}>
                     Sign in and request access
                   </a>
-                  <a className="btn btn-quiet btn-block" href={signInHref}>
+                  <a className="btn btn-quiet btn-block" href={signUpHref}>
                     Create an account
                   </a>
                 </>
@@ -418,6 +439,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
           )}
         </div>
       )}
+      <LandingFooter />
     </div>
   );
 }

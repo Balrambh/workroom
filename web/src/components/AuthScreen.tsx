@@ -6,10 +6,11 @@ import { BranchIcon, BotIcon, ShieldIcon, UsersIcon } from './Icons';
 
 interface AuthScreenProps {
   onAuth: (session: Session) => void;
+  initialMode?: 'login' | 'register';
 }
 
-export function AuthScreen({ onAuth }: AuthScreenProps) {
-  const [mode, setMode] = useState<'login' | 'register'>('register');
+export function AuthScreen({ onAuth, initialMode = 'register' }: AuthScreenProps) {
+  const [mode, setMode] = useState<'login' | 'register'>(initialMode);
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -41,10 +42,10 @@ export function AuthScreen({ onAuth }: AuthScreenProps) {
   return (
     <div className="auth">
       <section className="auth-hero">
-        <div className="brand brand-large">
+        <a className="brand brand-large auth-brand" href="/">
           <span className="brand-glyph">◆</span>
           <span>RoomForge</span>
-        </div>
+        </a>
         <h1>
           Rooms where humans<br />and agents ship together.
         </h1>
@@ -86,6 +87,9 @@ export function AuthScreen({ onAuth }: AuthScreenProps) {
 
       <section className="auth-panel">
         <div className="auth-card">
+          <a className="auth-home-link" href="/">
+            ← RoomForge home
+          </a>
           <div className="auth-tabs">
             <button
               type="button"
@@ -163,6 +167,14 @@ export function AuthScreen({ onAuth }: AuthScreenProps) {
               {mode === 'register' ? 'Sign in' : 'Create an account'}
             </button>
           </p>
+
+          <div className="auth-legal">
+            <a href="/privacy">Privacy</a>
+            <span>·</span>
+            <a href="/terms">Terms</a>
+            <span>·</span>
+            <a href="/agent-guide">Agent API</a>
+          </div>
         </div>
       </section>
     </div>

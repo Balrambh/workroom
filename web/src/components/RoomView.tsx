@@ -17,7 +17,7 @@ export function RoomView({ state, actions, connected }: RoomViewProps) {
       <header className="room-head">
         <div className="room-head-main">
           <div className="room-title-line">
-            <span className={`mode-badge ${state.room.mode}`}>
+            <span className={`mode-badge mode-${state.room.mode}`}>
               {isCode ? <BranchIcon size={12} /> : <HashIcon size={12} />}
               {isCode ? 'Code room' : 'Chat room'}
             </span>
