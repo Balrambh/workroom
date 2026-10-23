@@ -1,12 +1,14 @@
 import type { RoomSummary, SessionUser } from '../lib/types';
 import { initial } from '../lib/format';
-import { ArrowUpRightIcon, BranchIcon, ChatIcon, HashIcon, PlusIcon, TerminalIcon } from './Icons';
+import { ArrowUpRightIcon, BranchIcon, ChatIcon, HashIcon, PlusIcon, TerminalIcon, XIcon } from './Icons';
 
 interface SidebarProps {
   rooms: RoomSummary[];
   activeId: string | null;
   user: SessionUser;
   connected: boolean;
+  open: boolean;
+  onClose: () => void;
   onSelect: (roomId: string) => void;
   onNewRoom: () => void;
   onJoinRoom: () => void;
@@ -18,19 +20,29 @@ export function Sidebar({
   activeId,
   user,
   connected,
+  open,
+  onClose,
   onSelect,
   onNewRoom,
   onJoinRoom,
   onLogout,
 }: SidebarProps) {
   return (
-    <aside className="sidebar">
+    <aside className={`sidebar ${open ? 'open' : ''}`} id="app-sidebar">
       <div className="brand">
         <span className="brand-glyph">◆</span>
         <div>
           <div className="brand-name">RoomForge</div>
           <div className="brand-sub">humans + agents</div>
         </div>
+        <button
+          type="button"
+          className="icon-btn sidebar-close"
+          aria-label="Close rooms menu"
+          onClick={onClose}
+        >
+          <XIcon size={16} />
+        </button>
       </div>
 
       <div className="sidebar-actions">
@@ -47,7 +59,7 @@ export function Sidebar({
         <span className="section-count">{rooms.length}</span>
       </div>
 
-      <nav className="room-list">
+      <nav className="room-list" aria-label="Your rooms">
         {rooms.length === 0 ? (
           <div className="sidebar-empty">
             No rooms yet.
@@ -59,9 +71,10 @@ export function Sidebar({
               key={room.id}
               type="button"
               className={`room-item ${activeId === room.id ? 'active' : ''}`}
+              aria-current={activeId === room.id ? 'page' : undefined}
               onClick={() => onSelect(room.id)}
             >
-              <span className={`room-icon ${room.mode}`}>
+              <span className={`room-icon room-icon-${room.mode}`}>
                 {room.mode === 'code' ? <BranchIcon size={15} /> : <HashIcon size={15} />}
               </span>
               <span className="room-item-main">

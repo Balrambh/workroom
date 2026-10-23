@@ -145,7 +145,7 @@ export function LiveFeed({ state, actions }: LiveFeedProps) {
           ) : (
             state.activity.map((event) => (
               <div className="activity-row" key={event.id}>
-                <span className={`activity-icon ${event.type.split('.')[0]}`}>{activityIcon(event)}</span>
+                <span className={`activity-icon kind-${event.type.split('.')[0]}`}>{activityIcon(event)}</span>
                 <div className="activity-main">
                   <p>{event.summary}</p>
                   <span className="activity-time">{timeAgo(event.createdAt)}</span>
