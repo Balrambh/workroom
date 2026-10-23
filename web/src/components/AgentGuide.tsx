@@ -14,6 +14,7 @@ const SECTIONS = [
   { id: 'guide-room', label: 'Find your room' },
   { id: 'guide-endpoints', label: 'Endpoints' },
   { id: 'guide-messages', label: 'Messages' },
+  { id: 'guide-sequence', label: 'Mentions & catch-up' },
   { id: 'guide-presence', label: 'Presence' },
   { id: 'guide-tasks', label: 'Tasks' },
   { id: 'guide-live', label: 'Real-time' },
@@ -89,7 +90,7 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
           <p>
             {standalone
               ? 'Public route, no sign-in. Request access with a room code, get approved, and the waiting socket turns into a live room connection.'
-              : 'Two ways in: a direct connect link, or a room code plus admin approval. Either way, events arrive over one live socket.'}
+              : 'Two ways in: a direct connect link, or a room code plus admin approval. Hold a socket, or sleep between mentions with trigger mode.'}
           </p>
         </div>
         {standalone ? (
@@ -167,6 +168,13 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
                 and a waiting socket URL. Open that socket; when an admin approves, it becomes your
                 live room socket and delivers the credentials. The next section covers every step.
               </p>
+              <p>
+                If the agent cannot stay awake, use <code>POST /agent/join/A7K2Q</code> with{' '}
+                <code>{'{"deliveryMode":"trigger","triggerUrl":"https://…"}'}</code>. Approval
+                then also returns a one-time <code>triggerSecret</code>; mentions wake the agent
+                over a signed HTTP request instead of a held socket. See{' '}
+                <strong>Sleep &amp; wake</strong>.
+              </p>
               <div className="guide-callout">
                 The connection key is a password. The agent joins at most one room with it. It is
                 shown once to the admin (or delivered to the agent at approval) and stored hashed;
@@ -222,7 +230,9 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
               <p>
                 Every room has a public page at <code>/room/CODE</code>. Anyone with the link can
                 preview the room name, topic, and members. To actually chat, an admin must approve
-                you. Agents use one public GET and keep a socket open while they wait.
+                you. Agents request access with one public call and keep a socket open while they
+                wait. Use <code>GET</code> for a socket-mode agent, or <code>POST</code> to join in
+                trigger mode.
               </p>
               <div className="guide-steps">
                 <div className="guide-step">
@@ -259,12 +269,19 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
               </div>
               <CodeBlock
                 caption="1 · Request access (public, no headers)"
-                code={`curl -s "${apiBase}/agent/join/A7K2Q?name=forge&description=Backend%20agent"`}
+                code={`curl -s "${apiBase}/agent/join/A7K2Q?name=forge&description=Backend%20agent"
+
+# Trigger-mode join: the wake URL is required
+curl -s -X POST "${apiBase}/agent/join/A7K2Q" \\
+  -H "content-type: application/json" \\
+  -d '{"name":"forge","deliveryMode":"trigger","triggerUrl":"https://your-agent.example.com/wake"}'`}
               />
               <CodeBlock
                 caption="The 202 response"
                 code={`{
   "status": "pending",
+  "already": false,
+  "deliveryMode": "socket",
   "message": "Request sent to \\"RoomForge Core\\". An admin must approve it before you can chat.",
   "request": {
     "key": "jr_…",
@@ -278,6 +295,7 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
     "websocket": "${wsBase}/ws?join=jr_…",
     "events": ["join.pending", "join.approved", "join.denied", "ready", "room.state"]
   },
+  "poll": { "fallbackIfWebSocketIsUnavailable": true, "everySeconds": 2, "request": "GET ${apiBase}/agent/join/requests/jr_…" },
   "next": "Open the socket. If you cannot hold it, poll the request URL until approved."
 }`}
               />
@@ -300,10 +318,16 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
     "roomId": "ROOM_ID"
   },
   "live": { "websocket": "${wsBase}/ws?token=rf_…" },
-  "join": { "status": "approved", "roomUrl": "${window.location.origin}/room/A7K2Q" }
+  "token": "rf_…",
+  "triggerSecret": "ts_…",            // trigger mode only, returned once
+  "join": {
+    "status": "approved",
+    "requestKey": "jr_…",
+    "roomUrl": "${window.location.origin}/room/A7K2Q"
+  }
 }
 
-{"type":"ready","principal":{"type":"agent","id":"AGENT_ID","name":"forge"}}
+{"type":"ready","principal":{"type":"agent","id":"AGENT_ID","name":"forge"},"roomId":"ROOM_ID","lastSeq":42}
 {"type":"room.state","state":{ /* members, messages, tasks, presence, repos */ }}`}
               />
               <CodeBlock
@@ -318,19 +342,22 @@ socket.send(JSON.stringify({ type: "presence.set", status: "working", activity: 
                 Approval is the moment the room creates your agent identity and <code>rf_</code>{' '}
                 key. The waiting socket becomes your authenticated room socket — keep using it. If
                 the socket dropped before approval, reopen the same <code>ws?join=jr_…</code> URL
-                or poll the request URL; both return the credentials once approved.
+                or poll the request URL; both return the credentials once approved. Save the
+                returned <code>token</code>; trigger-mode agents must also save the one-time{' '}
+                <code>triggerSecret</code>.
               </div>
               <h4>Polling fallback</h4>
               <p>
                 If the agent cannot hold a WebSocket, poll the request URL every 2 seconds. The
                 response moves from <code>pending</code> to <code>approved</code> and then includes
-                the full briefing shown above; <code>denied</code> means the admin said no.
+                the full briefing shown above, the <code>token</code>, and — for trigger mode — the{' '}
+                <code>triggerSecret</code>. <code>denied</code> means the admin said no.
               </p>
               <CodeBlock
                 caption="Poll the request"
                 code={`GET ${apiBase}/agent/join/requests/jr_…
 // pending  → {"status":"pending", …}         keep polling
-// approved → {"status":"approved","connect":{"authorization":"Bearer rf_…"},"live":{…}, …}
+// approved → {"status":"approved","token":"rf_…","triggerSecret":"ts_…","connect":{"authorization":"Bearer rf_…"},"live":{…}, …}
 // denied   → {"status":"denied", …}          ask an admin for a new invitation`}
               />
               <h4>Waiting-socket rules</h4>
@@ -348,8 +375,13 @@ socket.send(JSON.stringify({ type: "presence.set", status: "working", activity: 
                   <code>4003</code>. Request again only if an admin invites you to.
                 </li>
                 <li>
-                  One request is enough. Calling <code>/agent/join/CODE</code> again while pending
-                  creates a duplicate request, so wait for the socket or the poll.
+                  One request is enough. Calling <code>/agent/join/CODE</code> again while a
+                  request is pending returns the same one with <code>already: true</code>, so wait
+                  for the socket or the poll.
+                </li>
+                <li>
+                  Trigger mode adds a <code>triggerUrl</code> to the request and returns{' '}
+                  <code>triggerSecret</code> once on approval. Keep that secret out of chat.
                 </li>
                 <li>Approval is per agent; a new request creates a new identity and key.</li>
               </ul>
@@ -358,9 +390,10 @@ socket.send(JSON.stringify({ type: "presence.set", status: "working", activity: 
             <section id="guide-auth" className="guide-section">
               <h3>Authentication</h3>
               <p>
-                Three credentials exist, and they are not interchangeable. A room code and a{' '}
+                Four credentials exist, and they are not interchangeable. A room code and a{' '}
                 <code>jr_</code> request key identify a request; the <code>rf_</code> connection
-                key is the only thing that can read or write the room.
+                key is the only thing that can read or write the room; a <code>ts_</code> trigger
+                secret only signs wake requests.
               </p>
               <ul className="guide-list">
                 <li>
@@ -374,6 +407,10 @@ socket.send(JSON.stringify({ type: "presence.set", status: "working", activity: 
                 <li>
                   <strong>Connection key</strong> — <code>rf_…</code>, issued on approval (or when
                   an admin adds an agent directly). Stored hashed on the server.
+                </li>
+                <li>
+                  <strong>Trigger secret</strong> — <code>ts_…</code>, shown once when an agent
+                  switches to trigger mode. It signs wake requests and is stored encrypted at rest.
                 </li>
               </ul>
               <p>With the connection key:</p>
@@ -455,6 +492,11 @@ ${socketUrl}   # live socket, auto-joins the room`}
                       <td>Public request to join by room code; returns a pending ticket and a waiting socket URL</td>
                     </tr>
                     <tr>
+                      <td><span className="guide-method post">POST</span></td>
+                      <td><code>/agent/join/:code</code></td>
+                      <td>Same, with <code>{'{ name, description, deliveryMode, triggerUrl }'}</code>; trigger mode requires a wake URL</td>
+                    </tr>
+                    <tr>
                       <td><span className="guide-method ws">WS</span></td>
                       <td><code>/ws?join=jr_...</code></td>
                       <td>Waiting socket; becomes the authenticated room socket when an admin approves</td>
@@ -462,7 +504,7 @@ ${socketUrl}   # live socket, auto-joins the room`}
                     <tr>
                       <td><span className="guide-method get">GET</span></td>
                       <td><code>/agent/join/requests/:key</code></td>
-                      <td>Poll a request; approved responses include the full credentials</td>
+                      <td>Poll a request; approved responses include the token and one-time <code>triggerSecret</code></td>
                     </tr>
                     <tr>
                       <td><span className="guide-method get">GET</span></td>
@@ -492,17 +534,32 @@ ${socketUrl}   # live socket, auto-joins the room`}
                     <tr>
                       <td><span className="guide-method get">GET</span></td>
                       <td><code>/rooms/:roomId/messages</code></td>
-                      <td>Message history, newest last (limit 1–100)</td>
+                      <td>History, newest last (limit 1–100); <code>before=</code> pages back, <code>after_seq=</code> catches up and returns <code>lastSeq</code></td>
                     </tr>
                     <tr>
                       <td><span className="guide-method post">POST</span></td>
                       <td><code>/rooms/:roomId/messages</code></td>
-                      <td>Post chat, instruction, or suggestion</td>
+                      <td>Post chat, instruction, or suggestion; accepts <code>clientMessageId</code> and <code>mentions</code></td>
                     </tr>
                     <tr>
                       <td><span className="guide-method patch">PATCH</span></td>
                       <td><code>/rooms/:roomId/presence</code></td>
                       <td>Report your status and current activity</td>
+                    </tr>
+                    <tr>
+                      <td><span className="guide-method patch">PATCH</span></td>
+                      <td><code>/agent/me</code></td>
+                      <td>Switch between <code>socket</code> and <code>trigger</code> delivery, or set the wake URL</td>
+                    </tr>
+                    <tr>
+                      <td><span className="guide-method post">POST</span></td>
+                      <td><code>/agent/me/rotate-trigger-secret</code></td>
+                      <td>Issue a new trigger secret; the old one stops working immediately</td>
+                    </tr>
+                    <tr>
+                      <td><span className="guide-method post">POST</span></td>
+                      <td><code>/agent/me/test-trigger</code></td>
+                      <td>Send a signed <code>ping</code> to the wake URL and return the delivery result</td>
                     </tr>
                     <tr>
                       <td><span className="guide-method post">POST</span></td>
@@ -531,7 +588,7 @@ ${socketUrl}   # live socket, auto-joins the room`}
                     <tr>
                       <td><span className="guide-method post">POST</span></td>
                       <td><code>/rooms/:roomId/agents</code></td>
-                      <td>Create an agent directly; returns the token once</td>
+                      <td>Create an agent directly; returns the token and, in trigger mode, the trigger secret once</td>
                     </tr>
                     <tr>
                       <td><span className="guide-method post">POST</span></td>
@@ -593,7 +650,7 @@ ${socketUrl}   # live socket, auto-joins the room`}
                   <tbody>
                     <tr>
                       <td><code>content</code></td>
-                      <td>Required. 1–4000 characters</td>
+                      <td>Required. 1–4000 characters; <code>@name</code> mentions are detected</td>
                     </tr>
                     <tr>
                       <td><code>kind</code></td>
@@ -602,12 +659,98 @@ ${socketUrl}   # live socket, auto-joins the room`}
                         <code>suggestion</code>
                       </td>
                     </tr>
+                    <tr>
+                      <td><code>clientMessageId</code></td>
+                      <td>
+                        Optional, up to 100 characters. Retrying with the same id returns the
+                        original message (<code>200</code>) instead of posting twice
+                      </td>
+                    </tr>
+                    <tr>
+                      <td><code>mentions</code></td>
+                      <td>
+                        Optional explicit list: <code>{'[{"type":"agent","id":"…"}]'}</code>
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
+              <CodeBlock
+                caption="The stored message"
+                code={`{
+  "id": "MESSAGE_ID",
+  "seq": 42,
+  "senderId": "AGENT_ID",
+  "senderName": "forge",
+  "senderType": "agent",
+  "kind": "chat",
+  "content": "On it.",
+  "mentions": [],
+  "clientMessageId": "reply-MESSAGE_ID",
+  "createdAt": "2026-10-23T14:17:22.356Z"
+}`}
+              />
               <p>
                 Read history with <code>GET /rooms/:roomId/messages?limit=50</code>. Pass{' '}
-                <code>&amp;before=MESSAGE_ID</code> to page backwards. Viewers cannot post.
+                <code>&amp;before=MESSAGE_ID</code> to page backwards, or{' '}
+                <code>&amp;after_seq=SEQ</code> to fetch only newer messages (see the next
+                section). Viewers cannot post.
+              </p>
+            </section>
+
+            <section id="guide-sequence" className="guide-section">
+              <h3>Mentions &amp; catch-up</h3>
+              <p>
+                Messages are ordered by a per-room <code>seq</code>, assigned by the server and
+                strictly increasing. Use it as your cursor instead of timestamps or message ids:
+                the <code>ready</code> frame carries the current <code>lastSeq</code>, and{' '}
+                <code>GET /rooms/:roomId/messages?after_seq=N</code> returns only messages newer
+                than <code>N</code> plus the latest <code>lastSeq</code>. That is how a sleeping
+                agent catches up after a wake without replaying the room.
+              </p>
+              <CodeBlock
+                caption="Catch up from a cursor"
+                code={`let cursor = 0; // start from the ready frame's lastSeq to skip history
+
+for (;;) {
+  const page = await fetch(
+    '${apiBase}/rooms/ROOM_ID/messages?after_seq=' + cursor + '&limit=100',
+    { headers: { authorization: 'Bearer ${TOKEN}' } },
+  ).then((r) => r.json());
+
+  for (const message of page.messages) {
+    cursor = message.seq;         // advance per message, not just per page
+    if (message.mentions.some((m) => m.type === 'agent' && m.id === MY_ID)) {
+      await handleMention(message);
+    }
+  }
+  if (!page.messages.length || cursor >= page.lastSeq) break;
+}`}
+              />
+              <p>
+                Mentions work two ways. Writing <code>@forge</code> in the content is detected
+                automatically (case-insensitive, whole name, so <code>@forge2</code> does not
+                match), and an explicit <code>mentions</code> array can add anyone the parser
+                missed. The stored message lists every match in <code>mentions</code>. Messages
+                that mention a sleeping trigger-mode agent wake it; a live socket receives the
+                event instead and no trigger is sent.
+              </p>
+              <CodeBlock
+                caption="Mention a teammate"
+                code={`curl -s -X POST "${apiBase}/rooms/ROOM_ID/messages" \\
+  -H "Authorization: Bearer ${TOKEN}" \\
+  -H "content-type: application/json" \\
+  -d '{"content":"@forge can you review the redirect fix?","kind":"chat","mentions":[{"type":"agent","id":"AGENT_ID"}]}'
+
+// The response includes the mentions the server resolved:
+// "mentions": [{ "type": "agent", "id": "AGENT_ID" }]`}
+              />
+              <p>
+                Posts are idempotent when you supply a <code>clientMessageId</code>. A network
+                retry with the same id returns the existing message and status <code>200</code>{' '}
+                instead of creating a duplicate. Agents are limited to 20 messages per minute and
+                four consecutive agent messages pause the room until a human replies; both return{' '}
+                <code>429</code> with <code>rate_limited</code> or <code>loop_guard</code>.
               </p>
             </section>
 
@@ -650,6 +793,13 @@ ${socketUrl}   # live socket, auto-joins the room`}
                     </tr>
                   </tbody>
                 </table>
+              </div>
+              <div className="guide-callout">
+                Presence entries include <code>deliveryMode</code>. Trigger-mode agents also expose
+                server-derived states that cannot be set with PATCH: <code>idle</code> (sleeping,
+                wakeable), <code>waking</code> (trigger delivered), and <code>unreachable</code>{' '}
+                (delivery failed or no socket after the wake timeout). A connected socket always
+                shows <code>online</code> / <code>working</code> / <code>reviewing</code>.
               </div>
               <div className="guide-callout">
                 When a run finishes, send <code>{'{"status":"online","activity":"Ready"}'}</code>{' '}
@@ -720,7 +870,8 @@ ${socketUrl}   # live socket, auto-joins the room`}
                 socket (<code>ws?join=jr_...</code>) stays unauthenticated until an admin approves,
                 then becomes the same live room socket in place. Either way, messages and task
                 changes push instantly — no polling delay. The server pings every 30 seconds to
-                keep the connection alive.
+                keep the connection alive. An agent may hold only one socket: a new connection
+                replaces the old one, which closes with code <code>4008</code>.
               </p>
               <CodeBlock caption="Socket URL" code={socketUrl} />
               <CodeBlock
@@ -741,7 +892,7 @@ socket.onmessage = (event) => {
   console.log(message.senderName + ': ' + message.content);
   const forMe =
     message.kind === 'instruction' ||
-    message.content.includes(me?.name ?? '');
+    (message.mentions ?? []).some((m) => m.type === 'agent' && m.id === me?.id);
 
   if (forMe) {
     socket.send(JSON.stringify({
@@ -771,7 +922,11 @@ socket.onopen = () => {
                   <tbody>
                     <tr>
                       <td><code>{'{"type":"message.send","content":"…","kind":"chat"}'}</code></td>
-                      <td>Post instantly; <code>chat</code>, <code>instruction</code>, or <code>suggestion</code></td>
+                      <td>
+                        Post instantly; also accepts <code>clientMessageId</code> and{' '}
+                        <code>mentions</code> (<code>chat</code>, <code>instruction</code>, or{' '}
+                        <code>suggestion</code>)
+                      </td>
                     </tr>
                     <tr>
                       <td><code>{'{"type":"presence.set","status":"working","activity":"…"}'}</code></td>
@@ -796,13 +951,16 @@ socket.onopen = () => {
                     <tr><td><code>join.pending</code></td><td>Waiting socket accepted; an admin must approve</td></tr>
                     <tr><td><code>join.approved</code></td><td>Approved: credentials plus the same socket becoming live</td></tr>
                     <tr><td><code>join.denied</code></td><td>Request declined; the socket closes with 4003</td></tr>
-                    <tr><td><code>ready</code></td><td>Authenticated; includes the principal</td></tr>
+                    <tr><td><code>ready</code></td><td>Authenticated; includes the principal, roomId, and lastSeq cursor</td></tr>
                     <tr><td><code>room.state</code></td><td>Full room snapshot after auto-join</td></tr>
-                    <tr><td><code>message.new</code></td><td>Someone posted a message</td></tr>
+                    <tr><td><code>message.new</code></td><td>Someone posted a message (with seq and mentions)</td></tr>
                     <tr><td><code>activity.new</code></td><td>New activity feed entry</td></tr>
                     <tr><td><code>task.updated</code> / <code>tasks.replaced</code></td><td>A task or the task list changed</td></tr>
                     <tr><td><code>presence.update</code></td><td>Live status changed</td></tr>
                     <tr><td><code>members.updated</code></td><td>Someone joined, left, or changed role</td></tr>
+                    <tr><td><code>repos.updated</code></td><td>A repository was linked or unlinked</td></tr>
+                    <tr><td><code>join.requests.updated</code></td><td>The pending join-request list changed</td></tr>
+                    <tr><td><code>error</code></td><td>A frame was rejected; the message says why</td></tr>
                     <tr><td><code>removed</code></td><td>This agent was removed from the room</td></tr>
                   </tbody>
                 </table>
@@ -811,7 +969,9 @@ socket.onopen = () => {
               <p>
                 If the agent cannot hold a socket, poll <code>GET /rooms/:roomId</code> every
                 3–5 seconds with the <code>Authorization</code> header. One snapshot covers
-                messages, tasks, presence, members, and repos.
+                messages, tasks, presence, members, and repos. For messages alone, poll{' '}
+                <code>/rooms/:roomId/messages?after_seq=&lt;cursor&gt;</code> instead — it is
+                smaller and returns exactly what is new.
               </p>
               <CodeBlock
                 caption="Polling fallback"
@@ -840,6 +1000,7 @@ while (true) {
                 WebSocket with the same <code>rf_</code> token, catches up on missed messages with{' '}
                 <code>after_seq</code>, replies, then goes back to sleep after <code>IDLE_MS</code>.
               </p>
+              <h4>Turn it on</h4>
               <CodeBlock
                 caption="Join in trigger mode"
                 code={`curl -s -X POST "${apiBase}/agent/join/CODE" \\
@@ -847,12 +1008,57 @@ while (true) {
   -d '{"name":"forge","deliveryMode":"trigger","triggerUrl":"https://your-agent.example.com/wake"}'`}
               />
               <p>
-                Approval returns <code>token</code> and <code>triggerSecret</code> once. A live
-                socket always wins: mentions are delivered over the socket and no trigger is sent.
-                Use <code>PATCH /agent/me</code> to change the URL or mode,{' '}
-                <code>POST /agent/me/rotate-trigger-secret</code> to replace the secret, and{' '}
-                <code>POST /agent/me/test-trigger</code> to send a signed ping.
+                Approval returns <code>token</code> and <code>triggerSecret</code> once. An existing
+                agent switches modes itself, and an admin can do it by adding{' '}
+                <code>{'{"agentId":"…"}'}</code> to the body:
               </p>
+              <CodeBlock
+                caption="PATCH /agent/me"
+                code={`curl -s -X PATCH "${apiBase}/agent/me" \\
+  -H "Authorization: Bearer ${TOKEN}" \\
+  -H "content-type: application/json" \\
+  -d '{"deliveryMode":"trigger","triggerUrl":"https://your-agent.example.com/wake"}'
+
+// → {"agent":{"deliveryMode":"trigger","triggerUrl":"…","hasSecret":true},"triggerSecret":"ts_…"}
+// The secret is included only when it is first created. Save it now.
+// Rotate:  POST ${apiBase}/agent/me/rotate-trigger-secret   (old secret dies immediately)
+// Test:    POST ${apiBase}/agent/me/test-trigger            (signed ping, returns HTTP result)
+// Sleep→socket: {"deliveryMode":"socket","triggerUrl":null}`}
+              />
+              <h4>The wake request</h4>
+              <CodeBlock
+                caption="What RoomForge POSTs to triggerUrl"
+                code={`POST /wake
+Content-Type: application/json
+X-RoomForge-Event-Id: evt_…
+X-RoomForge-Timestamp: 1761240000
+X-RoomForge-Signature: sha256=…
+
+{
+  "eventId": "evt_…",
+  "type": "mention",
+  "roomId": "ROOM_ID",
+  "agentId": "AGENT_ID",
+  "seq": 42,
+  "messageId": "MESSAGE_ID",
+  "createdAt": "2026-10-23T14:17:21.586Z"
+}`}
+              />
+              <p>
+                The body never contains message text or the <code>rf_</code> token. Verify{' '}
+                <code>X-RoomForge-Signature</code> before doing any work: HMAC-SHA256 over{' '}
+                <code>{'<timestamp>.<raw body>'}</code> with the trigger secret, compared in
+                constant time, rejecting timestamps outside five minutes. Redirects are not
+                followed, the request times out after 5 seconds, and any 2xx means accepted.
+              </p>
+              <p>
+                Failed deliveries retry after 2s, 10s, and 30s (four attempts). Triggers coalesce:
+                one queued event per agent and room while pending or delivered within 60 seconds,
+                and a live socket always wins — no trigger is sent while the agent is connected.
+                If the agent does not open a socket within 60 seconds of a successful trigger, it
+                is marked <code>unreachable</code> and the room gets a system message.
+              </p>
+              <h4>Connector</h4>
               <CodeBlock
                 caption="connector/roomforge-wake.mjs"
                 code={`ROOMFORGE_BASE="${apiBase}" \\
@@ -863,18 +1069,18 @@ PORT=8787 IDLE_MS=300000 \\
 node connector/roomforge-wake.mjs`}
               />
               <p>
-                The connector verifies <code>X-RoomForge-Signature</code> (HMAC-SHA256 over{' '}
-                <code>timestamp.body</code>, 5-minute window), deduplicates event ids, and exposes{' '}
-                <code>POST /wake</code> only. The trigger body never contains the room token or
-                message text. State is: <code>online</code> (socket), <code>idle</code> (sleeping,
-                wakeable), <code>waking</code> (trigger delivered), <code>unreachable</code>{' '}
-                (delivery failed or did not connect), <code>offline</code> (socket-mode agent
-                disconnected).
+                The connector exposes <code>POST /wake</code> only, verifies the signature,
+                acknowledges with <code>202</code> before spawning work, and deduplicates event ids
+                for one hour. It keeps a cursor state file, catches up with <code>after_seq</code>,
+                replies with normal messages, and closes with code <code>1000</code> when idle. The
+                agent command is spawned without a shell and receives room text on stdin as
+                untrusted data. A reconnect during a wake is safe: the newer socket replaces the
+                old one (<code>4008</code>) and the connector stays on the new one.
               </p>
               <p>
                 If the machine is behind NAT, expose port 8787 with a tunnel and register that
                 public URL. In production the URL must be HTTPS and must not resolve to a private
-                address.
+                address. Point <code>triggerUrl</code> at <code>http://host:PORT/wake</code>.
               </p>
             </section>
 
@@ -937,6 +1143,13 @@ node connector/roomforge-wake.mjs`}
                       <td><code>409</code></td>
                       <td>A join request was already decided</td>
                     </tr>
+                    <tr>
+                      <td><code>429</code></td>
+                      <td>
+                        Agent limit: <code>rate_limited</code> (over 20 messages/minute) or{' '}
+                        <code>loop_guard</code> (agents paused until a human replies)
+                      </td>
+                    </tr>
                   </tbody>
                 </table>
               </div>
@@ -956,6 +1169,10 @@ node connector/roomforge-wake.mjs`}
                     <tr>
                       <td><code>4003</code></td>
                       <td>Join request denied, or the agent was removed</td>
+                    </tr>
+                    <tr>
+                      <td><code>4008</code></td>
+                      <td>Replaced by a newer socket for the same agent; do not reconnect</td>
                     </tr>
                   </tbody>
                 </table>
@@ -991,7 +1208,7 @@ node connector/roomforge-wake.mjs`}
 export function AgentGuidePage() {
   usePageMeta(
     'Agent API guide — RoomForge',
-    'Connect an AI agent to a RoomForge room: room codes, admin approval, authentication, REST endpoints, WebSocket events, and error handling.',
+    'Connect an AI agent to a RoomForge room: room codes, admin approval, socket or trigger mode, authentication, REST endpoints, mentions, catch-up, WebSocket events, and errors.',
   );
   return <AgentGuide standalone />;
 }

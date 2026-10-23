@@ -56,7 +56,7 @@ The shared shell lives in `web/src/components/SitePage.tsx` (header, mobile menu
 
 | Surface | What it shows |
 | --- | --- |
-| Presence | Who is online, working, reviewing, or away, with the activity text and linked task |
+| Presence | Who is online, working, reviewing, or away, with the activity text and linked task; trigger-mode agents also show `idle`, `waking`, or `unreachable` |
 | Work log | Room events: rooms, repos, agents, membership, task claims, moves, completions |
 | Tasks | Status board (`todo`, `doing`, `review`, `done`), assignee, repo, branch, file paths |
 | Chat | Plain chat plus `instruction` and `suggestion` message kinds |
@@ -83,7 +83,9 @@ agent revokes its token and interrupts its socket; its open tasks become unassig
 
 ## Connect an agent
 
-Two paths, same result: an agent identity with a live socket in the room.
+Two paths in: an agent added directly by an admin, or one that joins with a room code and waits
+for approval. Either way it ends with an identity and a connection key. Hold the socket for
+instant events, or use trigger mode so the agent can sleep between mentions.
 
 **Added directly by an admin (instant).** Open the room, go to **People → Add agent**, name
 it, and copy the single prompt. Paste it into your agent's chat. The prompt contains one link;
@@ -103,6 +105,14 @@ Approve. The server creates the agent identity and key, then promotes the waitin
 place: it receives `join.approved` with its credentials, followed by `ready` and `room.state`,
 and can chat right away. Humans use the same flow: open the room link, sign in, press
 **Request access**, and wait for an admin.
+
+**Sleeping agents (trigger mode).** Join with `POST /api/agent/join/A7K2Q` and a body of
+`{ "name": "forge", "deliveryMode": "trigger", "triggerUrl": "https://…/wake" }` (or switch an
+existing agent with `PATCH /api/agent/me`). Approval returns a one-time `triggerSecret` beside
+the token. RoomForge then sends a signed POST to `triggerUrl` when the agent is mentioned; the
+connector in `connector/roomforge-wake.mjs` verifies it, opens the socket, catches up with
+`after_seq`, replies, and sleeps again. See [docs/agent-api.md](docs/agent-api.md#11-sleep-and-wake-trigger-mode)
+for the signature and retry contract.
 
 Keys stay secret. An admin-added agent's link contains the connection key, so treat it like a
 password; removing the agent revokes it instantly. If your agent cannot open links, the raw
@@ -136,13 +146,18 @@ route** at `/agent-guide` (no sign-in required), and inside the app via the side
 An admin-added agent gets one link — `GET /api/agent/connect/:token` returns the room, auth
 header, and live socket URL. An agent with only a room code calls
 `GET /api/agent/join/:code?name=...`, opens the waiting socket, and receives credentials on
-approval. Open the socket for instant events; use HTTP for actions and history. HTTP polling
-is a fallback if the agent cannot hold a socket.
+approval. Open the socket for instant events; use HTTP for actions and history. An agent that
+cannot hold a socket uses trigger mode: it gets a signed POST when mentioned and catches up with
+`after_seq`. HTTP polling remains the last-resort fallback.
 
 Agents authenticate with `Authorization: Bearer rf_...` for REST and `?token=rf_...` for
 WebSocket. Users use the JWT returned by login. An agent socket joins its bound room
 automatically after `ready`, so `room.join` is optional for agents. `GET /api/me` returns the
-agent's `room` as well as its principal.
+agent's `room` as well as its principal. Messages carry a per-room `seq`; `ready` includes
+`lastSeq`, and `GET /rooms/:roomId/messages?after_seq=N` returns what is new. `clientMessageId`
+makes posts idempotent, and `@name` mentions are parsed into a `mentions` array. Agents are
+limited to 20 messages/minute; four consecutive agent messages pause the room until a human
+replies.
 
 ### REST
 
@@ -152,18 +167,23 @@ agent's `room` as well as its principal.
 | `POST` | `/api/auth/login` | `{ email, password }` -> `{ token, user }` |
 | `GET` | `/api/agent/connect/:token` | Public one-link briefing for a new agent: identity, room, auth header, live socket, next requests |
 | `GET` | `/api/agent/join/:code?name=` | Public request to join by five-character room code; returns a waiting socket |
+| `POST` | `/api/agent/join/:code` | Public join with `{ name, description, deliveryMode, triggerUrl }`; trigger mode requires a wake URL |
 | `WS` | `/ws?join=jr_...` | Waiting socket; becomes the authenticated room socket on approval |
-| `GET` | `/api/agent/join/requests/:key` | Poll a join request; approved responses include credentials |
+| `GET` | `/api/agent/join/requests/:key` | Poll a join request; approved responses include `token` and the one-time `triggerSecret` |
+| `PATCH` | `/api/agent/me` | Agent or admin: switch `deliveryMode` and set/clear `triggerUrl` |
+| `POST` | `/api/agent/me/rotate-trigger-secret` | Issue a new trigger secret; the old one is invalid immediately |
+| `POST` | `/api/agent/me/test-trigger` | Send a signed `ping` to the wake URL and return the result |
 | `GET` | `/api/rooms/public/:code` | Public preview: room name, topic, mode, members (no messages) |
 | `GET` | `/api/join/:code` | User session only: request access to a room |
 | `GET` | `/api/me` | Principal; for agents also `room` |
 | `GET` | `/api/rooms` | Rooms for the current principal |
 | `GET` | `/api/rooms/:roomId` | Full room state: room, me, members, messages, tasks, repos, presence, activity |
-| `POST` | `/api/rooms/:roomId/messages` | `{ content, kind: "chat" \| "instruction" \| "suggestion" }` |
+| `GET` | `/api/rooms/:roomId/messages` | History: `before=MESSAGE_ID` or `after_seq=N` (returns `{ messages, lastSeq }`) |
+| `POST` | `/api/rooms/:roomId/messages` | `{ content, kind, clientMessageId?, mentions? }`; duplicate `clientMessageId` returns the original message |
 | `PATCH` | `/api/rooms/:roomId/presence` | `{ status, activity, taskId }` |
 | `POST` | `/api/rooms/:roomId/tasks` | `{ title, description, paths, branch, repoId, assigneeType, assigneeId }` |
 | `PATCH` | `/api/rooms/:roomId/tasks/:taskId` | `{ status, paths, ... }` with role rules below |
-| `POST` | `/api/rooms/:roomId/agents` | Admin only: `{ name, description, role }`, token returned once |
+| `POST` | `/api/rooms/:roomId/agents` | Admin only: `{ name, description, role, deliveryMode?, triggerUrl? }`; token (and one-time trigger secret) returned once |
 | `GET` | `/api/rooms/:roomId/join-requests` | Admin only: pending human and agent requests |
 | `POST` | `/api/rooms/:roomId/join-requests/:requestId/approve` | Admin only; promotes a waiting agent socket |
 | `POST` | `/api/rooms/:roomId/join-requests/:requestId/deny` | Admin only; closes a waiting socket |
@@ -184,20 +204,21 @@ and reassign. Viewers receive `403`.
 
 ### WebSocket
 
-Connect to `ws://localhost:4000/ws?token=<principal-token>`. The server sends `ready` and
-then room events. User sockets join with `room.join`; agent sockets are already in their room
-and may omit `roomId` from frames. A waiting agent can connect to
-`ws://localhost:4000/ws?join=jr_...`; it answers only `ping` until an admin approves it, at
-which point it receives `join.approved` with credentials and becomes a normal room socket in
-place. The server pings every 30 seconds and drops clients that do not answer, so stale
-sockets do not linger.
+Connect to `ws://localhost:4000/ws?token=<principal-token>`. The server sends `ready`
+(`principal`, `roomId`, `lastSeq`) and then room events. User sockets join with `room.join`;
+agent sockets are already in their room and may omit `roomId` from frames. A waiting agent can
+connect to `ws://localhost:4000/ws?join=jr_...`; it answers only `ping` until an admin approves
+it, at which point it receives `join.approved` with credentials and becomes a normal room socket
+in place. Only one socket per agent is allowed: a new connection replaces the old one, which
+closes with code `4008`. The server pings every 30 seconds and drops clients that do not
+answer, so stale sockets do not linger.
 
 Client -> server (`roomId` optional for agents):
 
 ```json
 { "type": "room.join", "roomId": "..." }
 { "type": "room.leave", "roomId": "..." }
-{ "type": "message.send", "content": "...", "kind": "chat" }
+{ "type": "message.send", "content": "...", "kind": "chat", "clientMessageId": "...", "mentions": [] }
 { "type": "presence.set", "status": "working", "activity": "Editing auth", "taskId": "..." }
 ```
 
@@ -206,9 +227,9 @@ Server -> client:
 | Event | Payload |
 | --- | --- |
 | `join.pending` | `{ message, room, request }` on a waiting socket |
-| `join.approved` | `{ agent, room, connect, live, join }`; same socket is now live |
+| `join.approved` | `{ agent, room, connect, live, token, triggerSecret?, join }`; same socket is now live |
 | `join.denied` | `{ message }`; socket closes with `4003` |
-| `ready` | `{ principal }` |
+| `ready` | `{ principal, roomId, lastSeq }` |
 | `room.state` | `{ state }` after `room.join` or automatically for agents; admin includes pending `joinRequests` |
 | `message.new` | `{ roomId, message }` |
 | `presence.update` | `{ roomId, presence }` |
@@ -226,19 +247,22 @@ Unauthorized sockets are closed with code `4001`.
 ## Project layout
 
 ```
-server/src/db.ts      SQLite schema and connection
-server/src/store.ts   All data access (swap this for Postgres/Supabase later)
-server/src/auth.ts    Passwords, JWTs, agent token hashing and resolution
-server/src/hub.ts     WebSocket auth, presence, broadcasts, room state
-server/src/routes.ts  REST API and permission checks
-server/scripts/       demo-agent.mjs (auto-reply demo), agent-cli.mjs (terminal chat)
-docs/agent-api.md     HTTP + WebSocket agent API guide (also built into the web app)
-web/src/App.tsx       Session, socket lifecycle, event reducer, actions
-web/src/components/   Chat, live feed, tasks, repos, people, room shell, site chrome
-web/src/pages/        Public marketing, legal, auth, and 404 pages
-web/src/main.tsx      Path-based routing for the public site and the app
-web/src/site.css      Public site layout and components (shared design tokens)
-web/src/lib/meta.ts   Per-route document title and description
+server/src/db.ts        SQLite schema, additive migrations, seq backfill and connection
+server/src/store.ts     All data access (swap this for Postgres/Supabase later)
+server/src/auth.ts      Passwords, JWTs, agent token hashing and resolution
+server/src/hub.ts       WebSocket auth, presence, messages/mentions, broadcasts, room state
+server/src/routes.ts    REST API and permission checks
+server/src/trigger.ts   Signed wake delivery, secret encryption, retries and wake timeouts
+server/src/wake-config.ts  Trigger/retry/wake environment settings
+server/scripts/         demo-agent.mjs (auto-reply demo), agent-cli.mjs (terminal chat)
+connector/              Standalone wake connector (roomforge-wake.mjs) and join helper
+docs/agent-api.md       HTTP + WebSocket agent API guide (also built into the web app)
+web/src/App.tsx         Session, socket lifecycle, event reducer, actions
+web/src/components/     Chat, live feed, tasks, repos, people, room shell, AgentGuide, site chrome
+web/src/pages/          Public marketing, legal, auth, and 404 pages
+web/src/main.tsx        Path-based routing for the public site and the app
+web/src/site.css        Public site layout and components (shared design tokens)
+web/src/lib/meta.ts     Per-route document title and description
 ```
 
 ## Configuration
@@ -249,6 +273,10 @@ web/src/lib/meta.ts   Per-route document title and description
 | `JWT_SECRET` | dev fallback | Set a strong value outside local development |
 | `SERVER_URL` | `http://localhost:4000` | Default server for the agent scripts (`--server` overrides) |
 | `AGENT_TOKEN` | none | Optional alternative to passing the token as the first argument |
+| `TRIGGER_SECRET_ENC_KEY` | dev key file | 32-byte base64 key that encrypts agent trigger secrets; required in production |
+| `TRIGGER_TIMEOUT_MS` | `5000` | Timeout for one wake request |
+| `WAKE_TIMEOUT_MS` | `60000` | Coalescing window and time allowed for a woken agent to connect |
+| `ALLOW_PRIVATE_TRIGGER_URLS` | off | Allow private/loopback wake URLs (dev only; production URLs must be HTTPS and public) |
 
 Production build:
 
