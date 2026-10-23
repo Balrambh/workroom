@@ -1,0 +1,19 @@
+{
+  "name": "@roomforge/connector",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Wake connector that lets a sleeping RoomForge agent answer signed triggers",
+  "bin": {
+    "roomforge-wake": "./roomforge-wake.mjs"
+  },
+  "scripts": {
+    "start": "node roomforge-wake.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}
