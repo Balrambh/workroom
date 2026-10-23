@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api } from '../lib/api';
-import { readSession } from '../lib/session';
+import { usePageMeta } from '../lib/meta';
 import type { PublicRoom, RoomMode } from '../lib/types';
+import { SitePage } from './SitePage';
 import {
   ArrowUpRightIcon,
   BranchIcon,
@@ -11,12 +12,15 @@ import {
   HashIcon,
   SearchIcon,
   ShieldIcon,
-  TerminalIcon,
   UsersIcon,
 } from './Icons';
 
 export function PublicRoomsPage() {
-  const [session] = useState(readSession);
+  usePageMeta(
+    'Public rooms — RoomForge',
+    'Browse public RoomForge rooms, preview members, or jump straight to a room with its five-character code.',
+  );
+
   const [rooms, setRooms] = useState<PublicRoom[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -28,10 +32,6 @@ export function PublicRoomsPage() {
 
   const [copiedCode, setCopiedCode] = useState<string | null>(null);
   const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    document.title = 'Public Rooms — RoomForge';
-  }, []);
 
   const loadRooms = () => {
     setLoading(true);
@@ -89,33 +89,19 @@ export function PublicRoomsPage() {
   }
 
   return (
-    <div className="landing rooms-directory-page">
-      <header className="landing-head">
-        <a className="brand" href="/">
-          <span className="brand-glyph">◆</span>
-          <span className="brand-name">RoomForge</span>
-        </a>
-        <div className="landing-head-actions">
-          <a className="btn btn-quiet btn-small" href="/agent-guide">
-            <TerminalIcon size={13} /> Agent guide
-          </a>
-          <a className="btn btn-ghost btn-small" href="/">
-            {session ? 'Open app' : 'Sign in'}
-          </a>
-        </div>
-      </header>
-
-      <main className="directory-main">
-        {/* Hero Section */}
-        <div className="directory-hero">
-          <span className="landing-eyebrow">
-            <ShieldIcon size={13} /> RoomForge Directory
-          </span>
-          <h1>Public Rooms</h1>
-          <p className="directory-subtitle">
-            Browse all available rooms or enter any room&apos;s unique 5-digit code to jump straight
-            into <code>/room/:code</code>.
-          </p>
+    <SitePage active="rooms">
+      <main className="site-main">
+        <div className="directory-main">
+          {/* Hero Section */}
+          <div className="directory-hero">
+            <span className="landing-eyebrow">
+              <ShieldIcon size={13} /> RoomForge Directory
+            </span>
+            <h1>Public Rooms</h1>
+            <p className="directory-subtitle">
+              Browse all available rooms or enter any room&apos;s unique five-character code to jump
+              straight into <code>/room/:code</code>.
+            </p>
 
           {/* Quick jump input */}
           <form className="quick-jump-form" onSubmit={handleJump}>
@@ -123,7 +109,7 @@ export function PublicRoomsPage() {
               <span className="quick-jump-label">/room/</span>
               <input
                 className="quick-jump-input"
-                placeholder="abc35"
+                placeholder="A7K2Q"
                 value={jumpCode}
                 onChange={(e) => {
                   setJumpCode(e.target.value);
@@ -241,7 +227,7 @@ export function PublicRoomsPage() {
                   onClick={() => window.location.assign(roomUrl)}
                 >
                   <div className="directory-card-head">
-                    <span className={`mode-badge ${room.mode}`}>
+                    <span className={`mode-badge mode-${room.mode}`}>
                       {isCodeMode ? <BranchIcon size={12} /> : <HashIcon size={12} />}
                       {isCodeMode ? 'Code room' : 'Chat room'}
                     </span>
@@ -297,10 +283,10 @@ export function PublicRoomsPage() {
           <div className="info-item">
             <span className="info-num">1</span>
             <div>
-              <strong>Instant 5-digit routes</strong>
+              <strong>Instant five-character routes</strong>
               <p>
                 Every room is reachable directly at <code>/room/:code</code> (for example,{' '}
-                <code>/room/abc35</code>).
+                <code>/room/A7K2Q</code>).
               </p>
             </div>
           </div>
@@ -324,7 +310,8 @@ export function PublicRoomsPage() {
             </div>
           </div>
         </div>
+        </div>
       </main>
-    </div>
+    </SitePage>
   );
 }

@@ -548,7 +548,7 @@ export default function App({ initialCode }: AppProps = {}) {
   }
 
   if (!session) {
-    return <AuthScreen onAuth={handleAuth} />;
+    return <AuthScreen onAuth={handleAuth} initialMode="login" />;
   }
 
   return (
@@ -567,7 +567,10 @@ export default function App({ initialCode }: AppProps = {}) {
           setJoinError(null);
           setJoinOpen(true);
         }}
-        onLogout={handleLogout}
+        onLogout={() => {
+          handleLogout();
+          window.location.assign('/');
+        }}
       />
 
       <main className="main">

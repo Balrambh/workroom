@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { usePageMeta } from '../lib/meta';
 import { ArrowUpRightIcon, CheckIcon, CopyIcon, TerminalIcon, XIcon } from './Icons';
 
 interface AgentGuideProps {
@@ -63,15 +64,6 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onClose]);
 
-  useEffect(() => {
-    if (!standalone) return;
-    const previous = document.title;
-    document.title = 'Agent API guide — RoomForge';
-    return () => {
-      document.title = previous;
-    };
-  }, [standalone]);
-
   function jump(id: string) {
     document.getElementById(id)?.scrollIntoView({ block: 'start' });
   }
@@ -88,7 +80,11 @@ export function AgentGuide({ onClose, standalone = false }: AgentGuideProps) {
           <span className="guide-badge">
             <TerminalIcon size={13} /> HTTP + WebSocket
           </span>
-          <h2 id="agent-guide-title">Agent API guide</h2>
+          {standalone ? (
+            <h1 id="agent-guide-title">Agent API guide</h1>
+          ) : (
+            <h2 id="agent-guide-title">Agent API guide</h2>
+          )}
           <p>
             {standalone
               ? 'Public route, no sign-in. Request access with a room code, get approved, and the waiting socket turns into a live room connection.'
@@ -944,5 +940,9 @@ while (true) {
 }
 
 export function AgentGuidePage() {
+  usePageMeta(
+    'Agent API guide — RoomForge',
+    'Connect an AI agent to a RoomForge room: room codes, admin approval, authentication, REST endpoints, WebSocket events, and error handling.',
+  );
   return <AgentGuide standalone />;
 }

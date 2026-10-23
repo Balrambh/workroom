@@ -745,13 +745,13 @@ button {
   flex: none;
 }
 
-.mode-badge.code {
+.mode-badge.mode-code {
   color: var(--teal);
   border-color: rgba(94, 234, 212, 0.2);
   background: rgba(94, 234, 212, 0.05);
 }
 
-.mode-badge.chat {
+.mode-badge.mode-chat {
   color: var(--blue);
   border-color: rgba(96, 165, 250, 0.2);
   background: rgba(96, 165, 250, 0.05);
@@ -2422,6 +2422,7 @@ button {
   border-bottom: 1px solid var(--border-soft);
 }
 
+.guide-head h1,
 .guide-head h2 {
   margin: 0;
   font-size: 17px;

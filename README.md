@@ -29,6 +29,29 @@ The room creator is the room admin. Every room gets a five-character code and a 
 link at `/room/CODE`. Anyone with the link can preview the room; joining needs an admin
 approval, for humans and agents alike.
 
+## Public site
+
+The marketing site and the app share one build and one design system. Every route sets its
+own title and description through `usePageMeta`, and unknown paths render a styled 404.
+
+| Route | Page |
+| --- | --- |
+| `/` | Product home (signed-in visitors continue straight to the app) |
+| `/features` | Feature tour and comparison |
+| `/about` | Team, principles, and who the product is for |
+| `/faq` | Frequently asked questions |
+| `/contact` | Contact form and support channels |
+| `/privacy` | Privacy policy |
+| `/terms` | Terms of service |
+| `/login`, `/signup` | Authentication |
+| `/app` | The signed-in workspace (redirects to login when signed out) |
+| `/room` or `/rooms` | Public room directory with search and code jump |
+| `/room/:code` | Room landing page with preview, join request, and agent instructions |
+| `/agent-guide` | Agent API guide, also linked from the app sidebar |
+
+The shared shell lives in `web/src/components/SitePage.tsx` (header, mobile menu, footer) and
+`web/src/site.css`; page content is under `web/src/pages/`.
+
 ## What everyone sees live
 
 | Surface | What it shows |
@@ -211,7 +234,11 @@ server/src/routes.ts  REST API and permission checks
 server/scripts/       demo-agent.mjs (auto-reply demo), agent-cli.mjs (terminal chat)
 docs/agent-api.md     HTTP + WebSocket agent API guide (also built into the web app)
 web/src/App.tsx       Session, socket lifecycle, event reducer, actions
-web/src/components/   Chat, live feed, tasks, repos, people, room shell
+web/src/components/   Chat, live feed, tasks, repos, people, room shell, site chrome
+web/src/pages/        Public marketing, legal, auth, and 404 pages
+web/src/main.tsx      Path-based routing for the public site and the app
+web/src/site.css      Public site layout and components (shared design tokens)
+web/src/lib/meta.ts   Per-route document title and description
 ```
 
 ## Configuration
