@@ -20,6 +20,7 @@ import type {
   Task,
   TaskInput,
   TaskPatch,
+  VoiceParticipant,
 } from './lib/types';
 import { AuthScreen } from './components/AuthScreen';
 import { Sidebar } from './components/Sidebar';
@@ -53,6 +54,7 @@ export default function App({ initialCode }: AppProps = {}) {
   const [roomState, setRoomState] = useState<RoomState | null>(null);
   const [loadingRoom, setLoadingRoom] = useState(false);
   const [connected, setConnected] = useState(false);
+  const [activeSocket, setActiveSocket] = useState<WebSocket | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
 
@@ -238,6 +240,12 @@ export default function App({ initialCode }: AppProps = {}) {
           if (payload.roomId !== active) break;
           setRoomState((prev) => (prev ? { ...prev, presence: payload.presence as PresenceEntry[] } : prev));
           break;
+        case 'voice.participants':
+          if (payload.roomId !== active) break;
+          setRoomState((prev) =>
+            prev ? { ...prev, voice: payload.participants as VoiceParticipant[] } : prev,
+          );
+          break;
         case 'task.updated':
           if (payload.roomId !== active) break;
           setRoomState((prev) => {
@@ -316,6 +324,7 @@ export default function App({ initialCode }: AppProps = {}) {
 
       socket.onopen = () => {
         setConnected(true);
+        setActiveSocket(socket);
         const id = activeIdRef.current;
         if (id) socket?.send(JSON.stringify({ type: 'room.join', roomId: id }));
       };
@@ -330,6 +339,7 @@ export default function App({ initialCode }: AppProps = {}) {
 
       socket.onclose = () => {
         setConnected(false);
+        setActiveSocket(null);
         socketRef.current = null;
         if (!disposed) retryTimer = setTimeout(openSocket, 1600);
       };
@@ -347,6 +357,7 @@ export default function App({ initialCode }: AppProps = {}) {
       socket?.close();
       socketRef.current = null;
       setConnected(false);
+      setActiveSocket(null);
     };
   }, [session?.token]);
 
@@ -637,6 +648,7 @@ export default function App({ initialCode }: AppProps = {}) {
             state={roomState}
             actions={actions}
             connected={connected}
+            socket={activeSocket}
             navOpen={navOpen}
             onOpenNav={() => setNavOpen(true)}
           />

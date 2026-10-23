@@ -1,11 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomActions, RoomState } from '../lib/types';
+import type { VoiceController } from '../lib/useRoomVoice';
 import { clockTime, initial } from '../lib/format';
 import { BotIcon, ChatIcon, LightbulbIcon, SendIcon, TerminalIcon } from './Icons';
+import { VoiceDock } from './VoiceDock';
 
 interface ChatPanelProps {
   state: RoomState;
   actions: RoomActions;
+  voice: VoiceController;
+  connected: boolean;
 }
 
 const KIND_OPTIONS = [
@@ -41,7 +45,7 @@ function dayLabel(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export function ChatPanel({ state, actions }: ChatPanelProps) {
+export function ChatPanel({ state, actions, voice, connected }: ChatPanelProps) {
   const [text, setText] = useState(() => drafts.get(state.room.id) ?? '');
   const [kind, setKind] = useState<(typeof KIND_OPTIONS)[number]['value']>('chat');
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -99,6 +103,13 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
         <span className="section-label">Discussion</span>
         <span className="section-count">{state.messages.length} messages</span>
       </div>
+
+      <VoiceDock
+        voice={voice}
+        participants={state.voice ?? []}
+        me={state.me}
+        connected={connected}
+      />
 
       <div className="messages" ref={listRef} onScroll={handleScroll}>
         {state.messages.length === 0 ? (
