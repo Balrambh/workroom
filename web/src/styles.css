@@ -948,14 +948,22 @@ button {
   min-height: 0;
   overflow-y: auto;
   padding: 14px 22px 6px;
+  display: flex;
+  flex-direction: column;
+}
+
+.messages-spacer {
+  flex: 1 1 auto;
+  min-height: 8px;
 }
 
 .chat-empty {
+  margin: auto;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 6px;
-  padding: 68px 20px;
+  padding: 48px 20px;
   text-align: center;
 }
 

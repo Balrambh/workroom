@@ -2,7 +2,6 @@ import type { Server as HttpServer } from 'node:http';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { RawData } from 'ws';
 import { resolveToken } from './auth.js';
-import { WAKE_TIMEOUT_MS } from './wake-config.js';
 import { HttpError } from './errors.js';
 import * as store from './store.js';
 import type {
@@ -298,17 +297,18 @@ function enforceAgentSend(roomId: string, agentId: string): void {
   agentMessageTimes.set(agentId, recent);
 }
 
-/* A sleeping trigger-mode agent gets one wake event per room, then catches up
- * over after_seq. A live socket always wins and never receives a trigger. */
+/* A live socket wins and never receives a trigger. A sleeping trigger-mode agent
+ * gets one wake per room; a wake already queued or in flight catches up over
+ * after_seq, so new mentions coalesce into it until that wake settles. */
 function routeMentions(roomId: string, message: Message): void {
-  const deliveredSince = new Date(Date.now() - WAKE_TIMEOUT_MS).toISOString();
   for (const mention of message.mentions) {
     if (mention.type !== 'agent') continue;
     if (mention.id === message.senderId) continue;
     if (isAgentConnected(mention.id)) continue;
-    const agent = store.getAgentTrigger(mention.id);
-    if (!agent || agent.deliveryMode !== 'trigger' || !agent.triggerUrl) continue;
-    if (store.hasLiveTriggerEvent(mention.id, roomId, deliveredSince)) continue;
+    const agent = store.getAgentRuntime(mention.id);
+    if (!agent || agent.deliveryMode !== 'trigger' || !agent.triggerUrl || !agent.hasSecret) continue;
+    if (agent.wakeState === 'waking') continue;
+    if (store.hasPendingTriggerEvent(mention.id, roomId)) continue;
     store.createTriggerEvent(mention.id, roomId, message.id, message.seq);
   }
 }

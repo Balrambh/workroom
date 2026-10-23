@@ -725,15 +725,12 @@ export function getTriggerEvent(id: string): TriggerEventRow | undefined {
   return row ? mapTriggerEvent(row) : undefined;
 }
 
-export function hasLiveTriggerEvent(agentId: string, roomId: string, deliveredSince: string): boolean {
+export function hasPendingTriggerEvent(agentId: string, roomId: string): boolean {
   const row = db
     .prepare(
-      `SELECT 1 FROM trigger_events
-       WHERE agent_id = ? AND room_id = ?
-         AND (status = 'pending' OR (status = 'delivered' AND delivered_at IS NOT NULL AND delivered_at > ?))
-       LIMIT 1`,
+      "SELECT 1 FROM trigger_events WHERE agent_id = ? AND room_id = ? AND status = 'pending' LIMIT 1",
     )
-    .get(agentId, roomId, deliveredSince);
+    .get(agentId, roomId);
   return Boolean(row);
 }
 

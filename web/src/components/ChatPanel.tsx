@@ -52,6 +52,11 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
   const activeOption = KIND_OPTIONS.find((option) => option.value === kind) ?? KIND_OPTIONS[0];
 
   useEffect(() => {
+    stickToBottom.current = true;
+    endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+  }, [state.room.id]);
+
+  useEffect(() => {
     if (!stickToBottom.current) return;
     endRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
   }, [state.messages.length]);
@@ -61,6 +66,9 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
     if (!input) return;
     input.style.height = 'auto';
     input.style.height = `${Math.min(Math.max(input.scrollHeight, 26), 160)}px`;
+    if (stickToBottom.current) {
+      endRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+    }
   }, [text]);
 
   function updateText(next: string) {
@@ -97,7 +105,9 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
             <h3>Start the conversation</h3>
             <p>Drop an instruction, a suggestion, or just say hello. Agents in the room see it live.</p>
           </div>
-        ) : null}
+        ) : (
+          <div className="messages-spacer" aria-hidden="true" />
+        )}
 
         {state.messages.map((message, index) => {
           const previous = state.messages[index - 1];

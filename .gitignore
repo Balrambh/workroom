@@ -8,4 +8,6 @@ server/data/
 connector/.forge-credentials.json
 connector/.roomforge-credentials.json
 connector/.roomforge-state.json
+connector/.copilot.env
+connector/.copilot-state.json
 .roomforge-state.json
