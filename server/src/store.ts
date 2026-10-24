@@ -1,7 +1,9 @@
 import { randomBytes, randomUUID } from 'node:crypto';
 import { db } from './db.js';
+import { handleFromName } from './handles.js';
 import type {
   Activity,
+  AgentProfile,
   AgentRuntime,
   AgentWakeState,
   DeliveryMode,
@@ -13,14 +15,19 @@ import type {
   MessageKind,
   Principal,
   PrincipalType,
+  ProfileAgentLink,
+  ProfileOwner,
+  ProfileRoom,
   Repo,
   Role,
   Room,
   RoomMode,
   RoomSummary,
+  RoomVisibility,
   Task,
   TaskStatus,
   TriggerEventStatus,
+  UserProfile,
 } from './types.js';
 
 type Row = Record<string, any>;
@@ -44,6 +51,12 @@ export interface UserRow {
   name: string;
   password_hash: string;
   created_at: string;
+  handle: string | null;
+  headline: string;
+  bio: string;
+  location: string;
+  website: string;
+  show_rooms: number;
 }
 
 export function createUser(name: string, email: string, passwordHash: string): UserRow {
@@ -53,14 +66,17 @@ export function createUser(name: string, email: string, passwordHash: string): U
     name,
     password_hash: passwordHash,
     created_at: nowIso(),
+    handle: allocateHandle(name, 'user'),
+    headline: '',
+    bio: '',
+    location: '',
+    website: '',
+    show_rooms: 1,
   };
-  db.prepare('INSERT INTO users (id, email, name, password_hash, created_at) VALUES (?, ?, ?, ?, ?)').run(
-    user.id,
-    user.email,
-    user.name,
-    user.password_hash,
-    user.created_at,
-  );
+  db.prepare(
+    `INSERT INTO users (id, email, name, password_hash, created_at, handle)
+     VALUES (?, ?, ?, ?, ?, ?)`,
+  ).run(user.id, user.email, user.name, user.password_hash, user.created_at, user.handle);
   return user;
 }
 
@@ -70,6 +86,94 @@ export function findUserByEmail(email: string): UserRow | undefined {
 
 export function findUserById(id: string): UserRow | undefined {
   return db.prepare('SELECT * FROM users WHERE id = ?').get(id) as UserRow | undefined;
+}
+
+export function findUserByHandle(handle: string): UserRow | undefined {
+  return db.prepare('SELECT * FROM users WHERE handle = ? COLLATE NOCASE').get(handle) as
+    | UserRow
+    | undefined;
+}
+
+export function handleInUse(handle: string, ignore?: { type: PrincipalType; id: string }): boolean {
+  const normalized = handle.trim().toLowerCase();
+  const user = db
+    .prepare('SELECT id FROM users WHERE handle = ? COLLATE NOCASE')
+    .get(normalized) as { id: string } | undefined;
+  if (user && !(ignore?.type === 'user' && ignore.id === user.id)) return true;
+  const agent = db
+    .prepare('SELECT id FROM agents WHERE handle = ? COLLATE NOCASE')
+    .get(normalized) as { id: string } | undefined;
+  if (agent && !(ignore?.type === 'agent' && ignore.id === agent.id)) return true;
+  return false;
+}
+
+function allocateHandle(name: string, type: 'user' | 'agent'): string {
+  const base = handleFromName(name, type);
+  let candidate = base;
+  let suffix = 2;
+  while (handleInUse(candidate)) {
+    const tail = `-${suffix}`;
+    candidate = `${base.slice(0, 30 - tail.length)}${tail}`;
+    suffix += 1;
+  }
+  return candidate;
+}
+
+export function updateUserProfile(
+  userId: string,
+  patch: {
+    name?: string;
+    handle?: string;
+    headline?: string;
+    bio?: string;
+    location?: string;
+    website?: string;
+    showRooms?: boolean;
+  },
+): UserRow | undefined {
+  const columns: Record<string, string> = {
+    name: 'name',
+    handle: 'handle',
+    headline: 'headline',
+    bio: 'bio',
+    location: 'location',
+    website: 'website',
+  };
+  const sets: string[] = [];
+  const values: (string | number)[] = [];
+  for (const [key, column] of Object.entries(columns)) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      sets.push(`${column} = ?`);
+      values.push(String((patch as Record<string, unknown>)[key] ?? ''));
+    }
+  }
+  if (patch.showRooms !== undefined) {
+    sets.push('show_rooms = ?');
+    values.push(patch.showRooms ? 1 : 0);
+  }
+  if (sets.length) {
+    db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...values, userId);
+  }
+  return findUserById(userId);
+}
+
+export function getUserPasswordHash(userId: string): string | undefined {
+  const row = db.prepare('SELECT password_hash FROM users WHERE id = ?').get(userId) as
+    | { password_hash: string }
+    | undefined;
+  return row?.password_hash;
+}
+
+export function updateUserPassword(userId: string, passwordHash: string): void {
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(passwordHash, userId);
+}
+
+export function listPrincipalRoomIds(type: PrincipalType, id: string): string[] {
+  return (
+    db
+      .prepare('SELECT room_id FROM room_members WHERE principal_type = ? AND principal_id = ?')
+      .all(type, id) as { room_id: string }[]
+  ).map((row) => row.room_id);
 }
 
 /* ------------------------------- rooms ---------------------------------- */
@@ -83,6 +187,7 @@ function mapRoom(row: Row): Room {
     createdAt: row.created_at,
     createdBy: row.created_by,
     code: row.code,
+    visibility: (row.visibility as RoomVisibility) ?? 'public',
   };
 }
 
@@ -104,7 +209,13 @@ export function getRoomLastSeq(roomId: string): number {
   return Number(row?.last_seq ?? 0);
 }
 
-export function createRoom(name: string, topic: string, mode: RoomMode, creator: Principal): Room {
+export function createRoom(
+  name: string,
+  topic: string,
+  mode: RoomMode,
+  creator: Principal,
+  visibility: RoomVisibility = 'public',
+): Room {
   let code = newRoomCode();
   while (db.prepare('SELECT 1 FROM rooms WHERE code = ? COLLATE NOCASE').get(code)) {
     code = newRoomCode();
@@ -112,23 +223,75 @@ export function createRoom(name: string, topic: string, mode: RoomMode, creator:
   const id = randomUUID();
   const createdAt = nowIso();
   db.prepare(
-    'INSERT INTO rooms (id, name, topic, mode, code, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-  ).run(id, name, topic, mode, code, creator.id, createdAt);
+    `INSERT INTO rooms (id, name, topic, mode, code, created_by, created_at, visibility)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, name, topic, mode, code, creator.id, createdAt, visibility);
   addMember(id, creator, 'admin');
   return getRoom(id)!;
+}
+
+export function updateRoom(
+  roomId: string,
+  patch: { name?: string; topic?: string; visibility?: RoomVisibility },
+): Room | undefined {
+  const columns: Record<string, string> = {
+    name: 'name',
+    topic: 'topic',
+    visibility: 'visibility',
+  };
+  const sets: string[] = [];
+  const values: string[] = [];
+  for (const [key, column] of Object.entries(columns)) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      sets.push(`${column} = ?`);
+      values.push(String((patch as Record<string, unknown>)[key] ?? ''));
+    }
+  }
+  if (sets.length) {
+    db.prepare(`UPDATE rooms SET ${sets.join(', ')} WHERE id = ?`).run(...values, roomId);
+  }
+  return getRoom(roomId);
+}
+
+export function deleteRoom(roomId: string): void {
+  db.prepare('DELETE FROM rooms WHERE id = ?').run(roomId);
+}
+
+export function countRoomAdmins(roomId: string): number {
+  const row = db
+    .prepare("SELECT COUNT(*) AS count FROM room_members WHERE room_id = ? AND role = 'admin'")
+    .get(roomId) as { count: number } | undefined;
+  return Number(row?.count ?? 0);
+}
+
+export function leaveRoom(roomId: string, userId: string): void {
+  removeMember(roomId, 'user', userId);
+  db.prepare('DELETE FROM room_reads WHERE room_id = ? AND user_id = ?').run(roomId, userId);
+  db.prepare("DELETE FROM room_join_requests WHERE room_id = ? AND user_id = ? AND status = 'pending'").run(
+    roomId,
+    userId,
+  );
 }
 
 export function listRoomsFor(principal: Principal): RoomSummary[] {
   const rows = db
     .prepare(
-      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, rm.role,
-              (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count
+      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, r.visibility, rm.role,
+              (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count,
+              (SELECT COUNT(*) FROM messages msg
+                 WHERE msg.room_id = r.id
+                   AND msg.seq > COALESCE(
+                     (SELECT rr.last_read_seq FROM room_reads rr
+                       WHERE rr.room_id = r.id AND rr.user_id = ?), 0)
+                   AND NOT (msg.sender_type = 'user' AND msg.sender_id = ?)) AS unread_count,
+              (SELECT COUNT(*) FROM room_join_requests jr
+                 WHERE jr.room_id = r.id AND jr.status = 'pending') AS pending_requests
        FROM room_members rm
        JOIN rooms r ON r.id = rm.room_id
        WHERE rm.principal_type = ? AND rm.principal_id = ?
        ORDER BY r.created_at DESC`,
     )
-    .all(principal.type, principal.id) as Row[];
+    .all(principal.id, principal.id, principal.type, principal.id) as Row[];
 
   return rows.map((row) => ({
     id: row.id,
@@ -138,6 +301,9 @@ export function listRoomsFor(principal: Principal): RoomSummary[] {
     role: row.role as Role,
     code: row.code,
     memberCount: Number(row.member_count),
+    unreadCount: principal.type === 'user' ? Number(row.unread_count) : 0,
+    pendingRequests: row.role === 'admin' ? Number(row.pending_requests) : 0,
+    visibility: (row.visibility as RoomVisibility) ?? 'public',
     createdAt: row.created_at,
   }));
 }
@@ -145,9 +311,10 @@ export function listRoomsFor(principal: Principal): RoomSummary[] {
 export function listPublicRooms(): (RoomSummary & { code: string; createdAt: string })[] {
   const rows = db
     .prepare(
-      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at,
+      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, r.visibility,
               (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count
        FROM rooms r
+       WHERE r.visibility = 'public'
        ORDER BY r.created_at DESC`,
     )
     .all() as Row[];
@@ -160,6 +327,9 @@ export function listPublicRooms(): (RoomSummary & { code: string; createdAt: str
     role: 'viewer' as Role,
     code: row.code,
     memberCount: Number(row.member_count),
+    unreadCount: 0,
+    pendingRequests: 0,
+    visibility: (row.visibility as RoomVisibility) ?? 'public',
     createdAt: row.created_at,
   }));
 }
@@ -210,7 +380,11 @@ export function listMembers(roomId: string): Member[] {
     .prepare(
       `SELECT rm.principal_type, rm.principal_id, rm.role, rm.joined_at,
               COALESCE(u.name, a.name, 'Unknown') AS name,
-              a.description AS description
+              a.description AS description,
+              COALESCE(u.handle, a.handle) AS handle,
+              CASE WHEN rm.principal_type = 'agent'
+                   THEN COALESCE(NULLIF(a.headline, ''), NULLIF(a.description, ''))
+                   ELSE NULL END AS headline
        FROM room_members rm
        LEFT JOIN users u ON rm.principal_type = 'user' AND u.id = rm.principal_id
        LEFT JOIN agents a ON rm.principal_type = 'agent' AND a.id = rm.principal_id
@@ -226,6 +400,8 @@ export function listMembers(roomId: string): Member[] {
     role: row.role as Role,
     joinedAt: row.joined_at,
     description: row.description ?? null,
+    handle: row.handle ?? null,
+    headline: row.headline ?? null,
   }));
 }
 
@@ -238,13 +414,19 @@ export function createAgent(
   role: Role,
   tokenHash: string,
   createdBy: string,
-  options: { deliveryMode?: DeliveryMode; triggerUrl?: string | null; triggerSecretEnc?: string | null } = {},
+  options: {
+    deliveryMode?: DeliveryMode;
+    triggerUrl?: string | null;
+    triggerSecretEnc?: string | null;
+    createdByType?: PrincipalType;
+  } = {},
 ): Member {
   const id = randomUUID();
+  const handle = allocateHandle(name, 'agent');
   db.prepare(
-    `INSERT INTO agents (id, room_id, name, description, role, token_hash, created_by, created_at,
-                         delivery_mode, trigger_url, trigger_secret_enc)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT INTO agents (id, room_id, name, description, role, token_hash, created_by, created_by_type,
+                         created_at, delivery_mode, trigger_url, trigger_secret_enc, handle, headline)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     roomId,
@@ -253,10 +435,13 @@ export function createAgent(
     role,
     tokenHash,
     createdBy,
+    options.createdByType ?? 'user',
     nowIso(),
     options.deliveryMode ?? 'socket',
     options.triggerUrl ?? null,
     options.triggerSecretEnc ?? null,
+    handle,
+    description,
   );
   addMember(roomId, { type: 'agent', id, name }, role);
   return listMembers(roomId).find((member) => member.type === 'agent' && member.id === id)!;
@@ -264,6 +449,11 @@ export function createAgent(
 
 export function deleteAgent(agentId: string): void {
   db.prepare('DELETE FROM agents WHERE id = ?').run(agentId);
+}
+
+export function rotateAgentToken(agentId: string, tokenHash: string): boolean {
+  const result = db.prepare('UPDATE agents SET token_hash = ? WHERE id = ?').run(tokenHash, agentId);
+  return Number(result.changes) > 0;
 }
 
 export function getAgentRoom(agentId: string): string | undefined {
@@ -355,6 +545,200 @@ export function listAgentsAwaitingSocket(olderThan: string): { id: string; room_
       "SELECT id, room_id, name FROM agents WHERE wake_state = 'waking' AND waking_since IS NOT NULL AND waking_since <= ?",
     )
     .all(olderThan) as { id: string; room_id: string; name: string }[];
+}
+
+/* ------------------------------- profiles ------------------------------- */
+
+function profileRoom(row: Row): ProfileRoom {
+  return {
+    code: row.code,
+    name: row.name,
+    topic: row.topic,
+    mode: row.mode as RoomMode,
+    memberCount: Number(row.member_count),
+    ...(row.role ? { role: row.role as Role } : {}),
+  };
+}
+
+export function listUserProfileRooms(userId: string): ProfileRoom[] {
+  const rows = db
+    .prepare(
+      `SELECT r.code, r.name, r.topic, r.mode, rm.role,
+              (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count
+       FROM room_members rm
+       JOIN rooms r ON r.id = rm.room_id
+       WHERE rm.principal_type = 'user' AND rm.principal_id = ?
+       ORDER BY r.created_at DESC`,
+    )
+    .all(userId) as Row[];
+  return rows.map(profileRoom);
+}
+
+function listUserCreatedAgents(userId: string): ProfileAgentLink[] {
+  const rows = db
+    .prepare(
+      `SELECT handle, name, COALESCE(NULLIF(headline, ''), NULLIF(description, ''), '') AS headline
+       FROM agents
+       WHERE created_by = ? AND created_by_type = 'user' AND handle IS NOT NULL AND handle <> ''
+       ORDER BY created_at DESC`,
+    )
+    .all(userId) as Row[];
+  return rows.map((row) => ({ handle: row.handle, name: row.name, headline: row.headline }));
+}
+
+function buildUserProfile(user: UserRow, publicView: boolean): UserProfile {
+  const showRooms = Boolean(user.show_rooms);
+  const includeRooms = !publicView || showRooms;
+  return {
+    type: 'user',
+    id: user.id,
+    handle: user.handle ?? '',
+    name: user.name,
+    headline: user.headline,
+    bio: user.bio,
+    location: user.location,
+    website: user.website,
+    joinedAt: user.created_at,
+    rooms: includeRooms ? listUserProfileRooms(user.id) : [],
+    agents: includeRooms ? listUserCreatedAgents(user.id) : [],
+    roomsHidden: !showRooms,
+    ...(publicView ? {} : { email: user.email, showRooms }),
+  };
+}
+
+export function getUserProfile(userId: string): UserProfile | undefined {
+  const user = findUserById(userId);
+  return user ? buildUserProfile(user, false) : undefined;
+}
+
+export function getUserProfileByHandle(handle: string): UserProfile | undefined {
+  const user = findUserByHandle(handle);
+  return user ? buildUserProfile(user, true) : undefined;
+}
+
+interface AgentProfileRow {
+  id: string;
+  room_id: string;
+  name: string;
+  handle: string | null;
+  headline: string;
+  bio: string;
+  website: string;
+  capabilities: string;
+  role: Role;
+  delivery_mode: string;
+  created_at: string;
+  created_by: string;
+  created_by_type: PrincipalType;
+}
+
+function parseCapabilities(raw: string): string[] {
+  return raw
+    .split(/[\n,]+/)
+    .map((value) => value.trim())
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function agentOwner(row: AgentProfileRow): ProfileOwner | null {
+  if (row.created_by_type === 'agent') {
+    const owner = db.prepare('SELECT name, handle FROM agents WHERE id = ?').get(row.created_by) as
+      | { name: string; handle: string | null }
+      | undefined;
+    return owner?.handle ? { type: 'agent', handle: owner.handle, name: owner.name } : null;
+  }
+  const owner = db.prepare('SELECT name, handle FROM users WHERE id = ?').get(row.created_by) as
+    | { name: string; handle: string | null }
+    | undefined;
+  return owner?.handle ? { type: 'user', handle: owner.handle, name: owner.name } : null;
+}
+
+function buildAgentProfile(row: AgentProfileRow): AgentProfile {
+  const room = getRoom(row.room_id);
+  const membership = getMembership(row.room_id, { type: 'agent', id: row.id, name: row.name });
+  const roomProfile = room
+    ? {
+        code: room.code ?? '',
+        name: room.name,
+        topic: room.topic,
+        mode: room.mode,
+        memberCount: listMembers(room.id).length,
+        role: membership?.role ?? row.role,
+      }
+    : null;
+
+  return {
+    type: 'agent',
+    id: row.id,
+    handle: row.handle ?? '',
+    name: row.name,
+    headline: row.headline,
+    bio: row.bio,
+    website: row.website,
+    capabilities: parseCapabilities(row.capabilities),
+    createdAt: row.created_at,
+    role: membership?.role ?? row.role,
+    deliveryMode: row.delivery_mode === 'trigger' ? 'trigger' : 'socket',
+    room: roomProfile,
+    owner: agentOwner(row),
+  };
+}
+
+const AGENT_PROFILE_SELECT = `
+  SELECT id, room_id, name, handle, headline, bio, website, capabilities, role,
+         delivery_mode, created_at, created_by, created_by_type
+  FROM agents
+`;
+
+export function getAgentProfile(agentId: string): AgentProfile | undefined {
+  const row = db.prepare(`${AGENT_PROFILE_SELECT} WHERE id = ?`).get(agentId) as
+    | AgentProfileRow
+    | undefined;
+  return row ? buildAgentProfile(row) : undefined;
+}
+
+export function getAgentProfileByHandle(handle: string): AgentProfile | undefined {
+  const row = db
+    .prepare(`${AGENT_PROFILE_SELECT} WHERE handle = ? COLLATE NOCASE`)
+    .get(handle) as AgentProfileRow | undefined;
+  return row ? buildAgentProfile(row) : undefined;
+}
+
+export function updateAgentProfile(
+  agentId: string,
+  patch: {
+    name?: string;
+    handle?: string;
+    headline?: string;
+    bio?: string;
+    website?: string;
+    capabilities?: string;
+  },
+): AgentProfile | undefined {
+  const columns: Record<string, string> = {
+    name: 'name',
+    handle: 'handle',
+    headline: 'headline',
+    bio: 'bio',
+    website: 'website',
+    capabilities: 'capabilities',
+  };
+  const sets: string[] = [];
+  const values: string[] = [];
+  for (const [key, column] of Object.entries(columns)) {
+    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+      sets.push(`${column} = ?`);
+      values.push(String((patch as Record<string, unknown>)[key] ?? ''));
+    }
+  }
+  if (patch.headline !== undefined) {
+    sets.push('description = ?');
+    values.push(patch.headline);
+  }
+  if (sets.length) {
+    db.prepare(`UPDATE agents SET ${sets.join(', ')} WHERE id = ?`).run(...values, agentId);
+  }
+  return getAgentProfile(agentId);
 }
 
 /* ---------------------------- join requests ----------------------------- */
@@ -657,6 +1041,49 @@ export function listMessages(roomId: string, before?: string, limit = 80): Messa
         .prepare('SELECT * FROM messages WHERE room_id = ? ORDER BY created_at DESC LIMIT ?')
         .all(roomId, limit) as Row[]);
   return rows.map(mapMessage).reverse();
+}
+
+export function listMessagesBeforeSeq(roomId: string, beforeSeq: number, limit = 80): Message[] {
+  const rows = db
+    .prepare('SELECT * FROM messages WHERE room_id = ? AND seq < ? ORDER BY seq DESC LIMIT ?')
+    .all(roomId, beforeSeq, limit) as Row[];
+  return rows.map(mapMessage).reverse();
+}
+
+export function getUnreadCount(roomId: string, userId: string): number {
+  const row = db
+    .prepare(
+      `SELECT COUNT(*) AS count FROM messages
+       WHERE room_id = ?
+         AND seq > COALESCE(
+           (SELECT last_read_seq FROM room_reads WHERE room_id = ? AND user_id = ?), 0)
+         AND NOT (sender_type = 'user' AND sender_id = ?)`,
+    )
+    .get(roomId, roomId, userId, userId) as { count: number } | undefined;
+  return Number(row?.count ?? 0);
+}
+
+export function markRoomRead(roomId: string, userId: string, seq: number): number {
+  const lastSeq = getRoomLastSeq(roomId);
+  const target = Math.min(Math.max(Math.floor(seq), 0), lastSeq);
+  const existing = db
+    .prepare('SELECT last_read_seq FROM room_reads WHERE room_id = ? AND user_id = ?')
+    .get(roomId, userId) as { last_read_seq: number } | undefined;
+  const next = Math.max(Number(existing?.last_read_seq ?? 0), target);
+  db.prepare(
+    `INSERT INTO room_reads (room_id, user_id, last_read_seq, updated_at)
+     VALUES (?, ?, ?, ?)
+     ON CONFLICT(room_id, user_id)
+     DO UPDATE SET last_read_seq = excluded.last_read_seq, updated_at = excluded.updated_at`,
+  ).run(roomId, userId, next, nowIso());
+  return next;
+}
+
+export function deleteMessage(roomId: string, messageId: string): Message | undefined {
+  const message = getMessageById(messageId);
+  if (!message || message.roomId !== roomId) return undefined;
+  db.prepare('DELETE FROM messages WHERE id = ? AND room_id = ?').run(messageId, roomId);
+  return message;
 }
 
 export function listMessagesAfter(roomId: string, afterSeq: number, limit = 100): Message[] {

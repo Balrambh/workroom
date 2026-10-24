@@ -1,4 +1,6 @@
 import type {
+  AgentProfile,
+  AgentProfilePatch,
   CreateAgentResult,
   DeliveryMode,
   JoinState,
@@ -7,6 +9,7 @@ import type {
   MessageKind,
   PresenceEntry,
   PresenceStatus,
+  Profile,
   Repo,
   Role,
   PublicRoom,
@@ -14,12 +17,15 @@ import type {
   RoomPreview,
   RoomState,
   RoomSummary,
+  RoomVisibility,
   Session,
   SessionUser,
   Task,
   TaskInput,
   TaskPatch,
   TriggerTestResult,
+  UserProfile,
+  UserProfilePatch,
 } from './types';
 
 export class ApiError extends Error {
@@ -71,8 +77,37 @@ export const api = {
     return request<Session>('/auth/login', { method: 'POST', body: input });
   },
 
-  me(): Promise<{ principal: { type: string; id: string; name: string; email?: string } }> {
+  me(): Promise<{
+    principal: { type: string; id: string; name: string; email?: string; handle?: string };
+  }> {
     return request('/me');
+  },
+
+  userProfile(handle: string): Promise<{ profile: UserProfile }> {
+    return request(`/profiles/users/${encodeURIComponent(handle)}`);
+  },
+
+  agentPublicProfile(handle: string): Promise<{ profile: AgentProfile }> {
+    return request(`/profiles/agents/${encodeURIComponent(handle)}`);
+  },
+
+  myProfile(): Promise<{ profile: Profile }> {
+    return request('/me/profile');
+  },
+
+  updateMyProfile(input: UserProfilePatch): Promise<{ profile: UserProfile }> {
+    return request('/me/profile', { method: 'PATCH', body: input });
+  },
+
+  agentProfile(agentId: string): Promise<{ profile: AgentProfile }> {
+    return request(`/agents/${encodeURIComponent(agentId)}/profile`);
+  },
+
+  updateAgentProfile(agentId: string, input: AgentProfilePatch): Promise<{ profile: AgentProfile }> {
+    return request(`/agents/${encodeURIComponent(agentId)}/profile`, {
+      method: 'PATCH',
+      body: input,
+    });
   },
 
   rooms(): Promise<{ rooms: RoomSummary[] }> {
@@ -83,8 +118,35 @@ export const api = {
     return request('/rooms/public');
   },
 
-  createRoom(input: { name: string; topic: string; mode: RoomMode }): Promise<{ room: RoomSummary }> {
+  createRoom(input: {
+    name: string;
+    topic: string;
+    mode: RoomMode;
+    visibility?: RoomVisibility;
+  }): Promise<{ room: RoomSummary }> {
     return request('/rooms', { method: 'POST', body: input });
+  },
+
+  updateRoom(
+    roomId: string,
+    patch: { name?: string; topic?: string; visibility?: RoomVisibility },
+  ): Promise<{ room: RoomSummary }> {
+    return request(`/rooms/${roomId}`, { method: 'PATCH', body: patch });
+  },
+
+  deleteRoom(roomId: string): Promise<{ ok: boolean }> {
+    return request(`/rooms/${roomId}`, { method: 'DELETE' });
+  },
+
+  leaveRoom(roomId: string): Promise<{ ok: boolean }> {
+    return request(`/rooms/${roomId}/leave`, { method: 'POST' });
+  },
+
+  markRead(roomId: string, seq?: number): Promise<{ unreadCount: number }> {
+    return request(`/rooms/${roomId}/read`, {
+      method: 'POST',
+      body: seq === undefined ? {} : { seq },
+    });
   },
 
   previewRoom(code: string): Promise<RoomPreview> {
@@ -103,13 +165,22 @@ export const api = {
     return request(`/rooms/${roomId}`);
   },
 
-  messages(roomId: string, before?: string): Promise<{ messages: Message[] }> {
-    const query = before ? `?before=${encodeURIComponent(before)}` : '';
-    return request(`/rooms/${roomId}/messages${query}`);
+  messages(
+    roomId: string,
+    beforeSeq?: number,
+    limit = 60,
+  ): Promise<{ messages: Message[]; lastSeq: number }> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (beforeSeq !== undefined) params.set('before_seq', String(beforeSeq));
+    return request(`/rooms/${roomId}/messages?${params.toString()}`);
   },
 
   sendMessage(roomId: string, content: string, kind: MessageKind): Promise<Message> {
     return request(`/rooms/${roomId}/messages`, { method: 'POST', body: { content, kind } });
+  },
+
+  deleteMessage(roomId: string, messageId: string): Promise<{ ok: boolean }> {
+    return request(`/rooms/${roomId}/messages/${messageId}`, { method: 'DELETE' });
   },
 
   setPresence(
@@ -132,6 +203,17 @@ export const api = {
 
   rotateTriggerSecret(agentId: string): Promise<{ triggerSecret: string }> {
     return request('/agent/me/rotate-trigger-secret', { method: 'POST', body: { agentId } });
+  },
+
+  rotateAgentToken(agentId: string): Promise<{ agentId: string; token: string }> {
+    return request(`/agents/${encodeURIComponent(agentId)}/rotate-token`, { method: 'POST' });
+  },
+
+  changePassword(input: {
+    currentPassword: string;
+    newPassword: string;
+  }): Promise<{ ok: true }> {
+    return request('/me/password', { method: 'PATCH', body: input });
   },
 
   setRole(roomId: string, member: Member, role: Role): Promise<{ members: Member[] }> {

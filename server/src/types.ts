@@ -1,6 +1,7 @@
 export type PrincipalType = 'user' | 'agent';
 export type Role = 'admin' | 'member' | 'viewer';
 export type RoomMode = 'chat' | 'code';
+export type RoomVisibility = 'public' | 'unlisted';
 export type TaskStatus = 'todo' | 'doing' | 'review' | 'done';
 export type MessageKind = 'chat' | 'instruction' | 'suggestion';
 export type PresenceStatus =
@@ -27,6 +28,7 @@ export interface Principal {
   id: string;
   name: string;
   email?: string;
+  handle?: string;
 }
 
 export interface Member {
@@ -36,6 +38,8 @@ export interface Member {
   role: Role;
   joinedAt: string;
   description: string | null;
+  handle: string | null;
+  headline: string | null;
 }
 
 export interface Room {
@@ -46,6 +50,7 @@ export interface Room {
   createdAt: string;
   createdBy: string;
   code?: string;
+  visibility: RoomVisibility;
 }
 
 export interface RoomSummary {
@@ -55,6 +60,9 @@ export interface RoomSummary {
   mode: RoomMode;
   role: Role;
   memberCount: number;
+  unreadCount: number;
+  pendingRequests: number;
+  visibility: RoomVisibility;
   code?: string;
   createdAt?: string;
 }
@@ -163,6 +171,60 @@ export interface AgentRuntime {
   lastSocketAt: string | null;
 }
 
+export interface ProfileRoom {
+  code: string;
+  name: string;
+  topic: string;
+  mode: RoomMode;
+  memberCount: number;
+  role?: Role;
+}
+
+export interface ProfileAgentLink {
+  handle: string;
+  name: string;
+  headline: string;
+}
+
+export interface ProfileOwner {
+  type: PrincipalType;
+  handle: string;
+  name: string;
+}
+
+export interface UserProfile {
+  type: 'user';
+  id: string;
+  handle: string;
+  name: string;
+  headline: string;
+  bio: string;
+  location: string;
+  website: string;
+  joinedAt: string;
+  rooms: ProfileRoom[];
+  agents: ProfileAgentLink[];
+  roomsHidden: boolean;
+  email?: string;
+  showRooms?: boolean;
+}
+
+export interface AgentProfile {
+  type: 'agent';
+  id: string;
+  handle: string;
+  name: string;
+  headline: string;
+  bio: string;
+  website: string;
+  capabilities: string[];
+  createdAt: string;
+  role: Role;
+  deliveryMode: DeliveryMode;
+  room: ProfileRoom | null;
+  owner: ProfileOwner | null;
+}
+
 export interface RoomState {
   room: Omit<Room, 'code'> & { code?: string };
   me: { type: PrincipalType; id: string; name: string; role: Role };
@@ -174,4 +236,5 @@ export interface RoomState {
   presence: PresenceEntry[];
   voice: VoiceParticipant[];
   joinRequests?: JoinRequest[];
+  unreadCount?: number;
 }

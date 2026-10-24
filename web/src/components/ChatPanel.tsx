@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RoomActions, RoomState } from '../lib/types';
+import type { ReactNode } from 'react';
+import type { Message, RoomActions, RoomState } from '../lib/types';
 import { clockTime, initial } from '../lib/format';
-import { BotIcon, ChatIcon, LightbulbIcon, SendIcon, TerminalIcon } from './Icons';
+import { BotIcon, ChatIcon, LightbulbIcon, SendIcon, TerminalIcon, TrashIcon } from './Icons';
 
 interface ChatPanelProps {
   state: RoomState;
@@ -30,6 +31,31 @@ const KIND_OPTIONS = [
 ] as const;
 
 const drafts = new Map<string, string>();
+const PAGE_SIZE = 60;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function highlightMentions(content: string, name: string): ReactNode {
+  if (!name) return content;
+  const pattern = new RegExp(`(@${escapeRegExp(name)})(?=$|[^\\p{L}\\p{N}_])`, 'giu');
+  const nodes: ReactNode[] = [];
+  let cursor = 0;
+  for (const match of content.matchAll(pattern)) {
+    const index = match.index ?? 0;
+    if (index > cursor) nodes.push(content.slice(cursor, index));
+    nodes.push(
+      <mark className="mention" key={`${index}-${match[0]}`}>
+        {match[0]}
+      </mark>,
+    );
+    cursor = index + match[0].length;
+  }
+  if (nodes.length === 0) return content;
+  if (cursor < content.length) nodes.push(content.slice(cursor));
+  return nodes;
+}
 
 function dayLabel(iso: string): string {
   const date = new Date(iso);
@@ -47,6 +73,9 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
   const stickToBottom = useRef(true);
+  const preserveScroll = useRef<{ height: number; count: number } | null>(null);
+  const [hasOlder, setHasOlder] = useState(state.messages.length >= 80);
+  const [loadingOlder, setLoadingOlder] = useState(false);
   const readOnly = state.me.role === 'viewer';
   const activeOption = KIND_OPTIONS.find((option) => option.value === kind) ?? KIND_OPTIONS[0];
 
@@ -57,6 +86,16 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
   }, [state.room.id]);
 
   useEffect(() => {
+    if (preserveScroll.current) {
+      const el = listRef.current;
+      const saved = preserveScroll.current;
+      if (el && state.messages.length > saved.count) {
+        el.scrollTop += el.scrollHeight - saved.height;
+        preserveScroll.current = null;
+        return;
+      }
+      if (state.messages.length <= saved.count) return;
+    }
     if (!stickToBottom.current) return;
     const list = listRef.current;
     if (list) list.scrollTo({ top: list.scrollHeight, behavior: 'smooth' });
@@ -93,6 +132,33 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
     stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 64;
   }
 
+  async function loadOlder() {
+    const list = listRef.current;
+    const oldestSeq = state.messages[0]?.seq;
+    if (!list || oldestSeq === undefined || loadingOlder || !hasOlder) return;
+    preserveScroll.current = { height: list.scrollHeight, count: state.messages.length };
+    setLoadingOlder(true);
+    try {
+      const older = await actions.loadOlder(oldestSeq);
+      if (older.length < PAGE_SIZE) setHasOlder(false);
+      if (older.length === 0) preserveScroll.current = null;
+    } catch (error) {
+      preserveScroll.current = null;
+      actions.notify(error instanceof Error ? error.message : 'Could not load older messages');
+    } finally {
+      setLoadingOlder(false);
+    }
+  }
+
+  async function removeMessage(message: Message) {
+    if (!window.confirm('Delete this message for everyone?')) return;
+    try {
+      await actions.deleteMessage(message.id);
+    } catch (error) {
+      actions.notify(error instanceof Error ? error.message : 'Could not delete the message');
+    }
+  }
+
   return (
     <section className="chat">
       <div className="chat-head">
@@ -114,9 +180,24 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
             <h3>Start the conversation</h3>
             <p>Say hello, drop an instruction, or share a suggestion. Everyone here sees it live.</p>
           </div>
-        ) : (
+        ) : null}
+
+        {state.messages.length > 0 && hasOlder ? (
+          <div className="history-bar">
+            <button
+              type="button"
+              className="btn btn-quiet btn-small"
+              disabled={loadingOlder}
+              onClick={loadOlder}
+            >
+              {loadingOlder ? 'Loading older messages…' : 'Load earlier messages'}
+            </button>
+          </div>
+        ) : null}
+
+        {state.messages.length > 0 ? (
           <div className="messages-spacer" aria-hidden="true" />
-        )}
+        ) : null}
 
         {state.messages.map((message, index) => {
           const previous = state.messages[index - 1];
@@ -127,11 +208,20 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
             previous.senderId === message.senderId &&
             new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60 * 1000;
           const isAgent = message.senderType === 'agent';
+          const mentionsMe =
+            message.senderType !== 'system' &&
+            message.mentions.some((mention) => mention.type === state.me.type && mention.id === state.me.id);
+          const canDelete =
+            message.senderType !== 'system' &&
+            (state.me.role === 'admin' ||
+              (message.senderType === state.me.type && message.senderId === state.me.id));
 
           return (
             <div key={message.id}>
               {newDay ? <div className="day-divider"><span>{dayLabel(message.createdAt)}</span></div> : null}
-              <article className={`msg ${isAgent ? 'agent' : ''} kind-${message.kind} ${sameSender ? 'grouped' : ''}`}>
+              <article
+                className={`msg ${isAgent ? 'agent' : ''} kind-${message.kind} ${sameSender ? 'grouped' : ''} ${mentionsMe ? 'mentions-me' : ''}`}
+              >
                 <div className="msg-avatar-wrap">
                   {!sameSender ? (
                     <span className={`avatar ${isAgent ? 'avatar-agent' : ''}`}>
@@ -150,10 +240,22 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
                           {message.kind}
                         </span>
                       ) : null}
+                      {mentionsMe ? <span className="tag tag-green">mentions you</span> : null}
                       <span className="msg-time">{clockTime(message.createdAt)}</span>
                     </div>
                   ) : null}
-                  <p className="msg-text">{message.content}</p>
+                  <p className="msg-text">{highlightMentions(message.content, state.me.name)}</p>
+                  {canDelete ? (
+                    <button
+                      type="button"
+                      className="msg-delete"
+                      title="Delete message"
+                      aria-label={`Delete message from ${message.senderName}`}
+                      onClick={() => removeMessage(message)}
+                    >
+                      <TrashIcon size={12} />
+                    </button>
+                  ) : null}
                 </div>
               </article>
             </div>

@@ -1,6 +1,15 @@
 import type { RoomSummary, SessionUser } from '../lib/types';
 import { initial } from '../lib/format';
-import { ArrowUpRightIcon, BranchIcon, ChatIcon, HashIcon, PlusIcon, TerminalIcon, XIcon } from './Icons';
+import {
+  ArrowUpRightIcon,
+  BranchIcon,
+  ChatIcon,
+  HashIcon,
+  PencilIcon,
+  PlusIcon,
+  TerminalIcon,
+  XIcon,
+} from './Icons';
 
 interface SidebarProps {
   rooms: RoomSummary[];
@@ -9,6 +18,7 @@ interface SidebarProps {
   connected: boolean;
   open: boolean;
   onClose: () => void;
+  onOpenProfile: () => void;
   onSelect: (roomId: string) => void;
   onNewRoom: () => void;
   onJoinRoom: () => void;
@@ -22,6 +32,7 @@ export function Sidebar({
   connected,
   open,
   onClose,
+  onOpenProfile,
   onSelect,
   onNewRoom,
   onJoinRoom,
@@ -66,25 +77,43 @@ export function Sidebar({
             <span>Create one, or join with an invite code.</span>
           </div>
         ) : (
-          rooms.map((room) => (
-            <button
-              key={room.id}
-              type="button"
-              className={`room-item ${activeId === room.id ? 'active' : ''}`}
-              aria-current={activeId === room.id ? 'page' : undefined}
-              onClick={() => onSelect(room.id)}
-            >
-              <span className={`room-icon room-icon-${room.mode}`}>
-                {room.mode === 'code' ? <BranchIcon size={15} /> : <HashIcon size={15} />}
-              </span>
-              <span className="room-item-main">
-                <span className="room-item-name">{room.name}</span>
-                <span className="room-item-meta">
-                  <ChatIcon size={11} /> {room.memberCount} · {room.role}
+          rooms.map((room) => {
+            const unread = room.unreadCount ?? 0;
+            const waiting = room.role === 'admin' ? room.pendingRequests ?? 0 : 0;
+            return (
+              <button
+                key={room.id}
+                type="button"
+                className={`room-item ${activeId === room.id ? 'active' : ''} ${unread > 0 ? 'has-unread' : ''}`}
+                aria-current={activeId === room.id ? 'page' : undefined}
+                aria-label={`${room.name}${unread > 0 ? `, ${unread} unread` : ''}${waiting > 0 ? `, ${waiting} join request${waiting === 1 ? '' : 's'} waiting` : ''}`}
+                onClick={() => onSelect(room.id)}
+              >
+                <span className={`room-icon room-icon-${room.mode}`}>
+                  {room.mode === 'code' ? <BranchIcon size={15} /> : <HashIcon size={15} />}
                 </span>
-              </span>
-            </button>
-          ))
+                <span className="room-item-main">
+                  <span className="room-item-top">
+                    <span className="room-item-name">{room.name}</span>
+                    {waiting > 0 ? (
+                      <span
+                        className="room-pending-dot"
+                        title={`${waiting} join request${waiting === 1 ? '' : 's'} waiting`}
+                      />
+                    ) : null}
+                  </span>
+                  <span className="room-item-meta">
+                    <ChatIcon size={11} /> {room.memberCount} · {room.role}
+                  </span>
+                </span>
+                {unread > 0 ? (
+                  <span className="room-unread" aria-hidden="true">
+                    {unread > 99 ? '99+' : unread}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })
         )}
       </nav>
 
@@ -106,11 +135,21 @@ export function Sidebar({
           {connected ? 'Realtime connected' : 'Reconnecting…'}
         </div>
         <div className="user-row">
-          <span className="avatar">{initial(user.name)}</span>
-          <span className="user-main">
-            <span className="user-name">{user.name}</span>
-            <span className="user-email">{user.email}</span>
-          </span>
+          <button
+            type="button"
+            className="user-chip"
+            onClick={onOpenProfile}
+            title="Open your profile"
+          >
+            <span className="avatar">{initial(user.name)}</span>
+            <span className="user-main">
+              <span className="user-name">{user.name}</span>
+              <span className="user-email">{user.handle ? `@${user.handle}` : user.email}</span>
+            </span>
+            <span className="user-chip-edit" aria-hidden="true">
+              <PencilIcon size={12} />
+            </span>
+          </button>
           <button type="button" className="btn btn-quiet btn-small" onClick={onLogout}>
             Sign out
           </button>
