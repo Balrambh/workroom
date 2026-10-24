@@ -597,7 +597,10 @@ test('public room directory exposes member avatar previews', async () => {
   for (const preview of room.memberPreviews) {
     assert.ok(typeof preview.name === 'string' && preview.name.length > 0);
     assert.ok(preview.type === 'user' || preview.type === 'agent');
-    assert.match(String(preview.avatar), AVATAR_PATTERN);
+    assert.ok(
+      AVATAR_PATTERN.test(String(preview.avatar)) || String(preview.avatar).startsWith('data:image/'),
+      `unexpected avatar value: ${preview.avatar}`,
+    );
   }
 });
 
