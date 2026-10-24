@@ -548,6 +548,40 @@ test('profile pictures are assigned automatically and can be changed', async () 
     body: { avatar: 'avatar-31' },
   });
   assert.equal(rejectedAgent.status, 400);
+
+  const customAvatar =
+    'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+  const customPatch = await api(server.base, '/me/profile', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { avatar: customAvatar },
+  });
+  assert.equal(customPatch.status, 200);
+  assert.equal(customPatch.body.profile.avatar, customAvatar);
+  const publicCustom = await api(server.base, `/profiles/users/${customPatch.body.profile.handle}`);
+  assert.equal(publicCustom.body.profile.avatar, customAvatar);
+  assert.equal((await roomState()).me.avatar, customAvatar);
+
+  const customAgentPatch = await api(server.base, `/agents/${created.agent.id}/profile`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { avatar: customAvatar },
+  });
+  assert.equal(customAgentPatch.status, 200);
+  assert.equal(customAgentPatch.body.profile.avatar, customAvatar);
+
+  for (const invalid of [
+    'data:image/svg+xml;base64,PHN2Zz48L3N2Zz4=',
+    'data:image/png;base64,not-base64!!',
+    `data:image/png;base64,${'A'.repeat(120_001)}`,
+  ]) {
+    const rejected = await api(server.base, '/me/profile', {
+      method: 'PATCH',
+      token: adminToken,
+      body: { avatar: invalid },
+    });
+    assert.equal(rejected.status, 400, invalid.slice(0, 40));
+  }
 });
 
 test('agent join over REST polling and admin approval', async () => {

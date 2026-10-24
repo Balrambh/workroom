@@ -367,6 +367,33 @@ export function ChatPanel({ state, actions, onOpenProfile }: ChatPanelProps) {
     }
   }
 
+  const [copiedMsgId, setCopiedMsgId] = useState<string | null>(null);
+
+  function handleCopyMessage(message: Message) {
+    actions.copy(message.content, 'Message text copied');
+    setCopiedMsgId(message.id);
+    setTimeout(() => setCopiedMsgId(null), 2000);
+  }
+
+  async function handleCreateTaskFromMessage(message: Message) {
+    try {
+      const firstLine = message.content.split('\n')[0].replace(/^#+\s*/, '').trim();
+      const taskTitle = firstLine.length > 80 ? `${firstLine.slice(0, 77)}…` : firstLine || 'New Task';
+      await actions.createTask({
+        title: taskTitle,
+        description: `Origin: message from ${message.senderName}\n\n${message.content}`,
+        paths: '',
+        branch: '',
+        repoId: null,
+        assigneeType: null,
+        assigneeId: null,
+      });
+      actions.notify(`Created task “${taskTitle}”`);
+    } catch (error) {
+      actions.notify(error instanceof Error ? error.message : 'Could not create task from message');
+    }
+  }
+
   return (
     <section className="chat">
       <div className="chat-head">
@@ -614,8 +641,12 @@ export function ChatPanel({ state, actions, onOpenProfile }: ChatPanelProps) {
                       </div>
                     </div>
                   ) : (
-                    <p className="msg-text">
-                      {highlightMentions(message.content, state.me.name)}
+                    <div className="msg-text-wrap">
+                      <FormattedMessage
+                        content={message.content}
+                        meName={state.me.name}
+                        onCopy={actions.copy}
+                      />
                       {message.editedAt ? (
                         <span
                           className="msg-edited"
@@ -624,10 +655,30 @@ export function ChatPanel({ state, actions, onOpenProfile }: ChatPanelProps) {
                           {' '}(edited)
                         </span>
                       ) : null}
-                    </p>
+                    </div>
                   )}
-                  {editingId !== message.id && (canEdit || canDelete) ? (
+                  {editingId !== message.id ? (
                     <div className="msg-actions">
+                      <button
+                        type="button"
+                        className={`msg-action ${copiedMsgId === message.id ? 'copied' : ''}`}
+                        title={copiedMsgId === message.id ? 'Copied' : 'Copy message'}
+                        aria-label="Copy message text"
+                        onClick={() => handleCopyMessage(message)}
+                      >
+                        {copiedMsgId === message.id ? <CheckIcon size={12} /> : <CopyIcon size={12} />}
+                      </button>
+                      {state.me.role !== 'viewer' && message.senderType !== 'system' ? (
+                        <button
+                          type="button"
+                          className="msg-action"
+                          title="Create task from message"
+                          aria-label="Create task from message"
+                          onClick={() => handleCreateTaskFromMessage(message)}
+                        >
+                          <PlusIcon size={12} />
+                        </button>
+                      ) : null}
                       {canEdit ? (
                         <button
                           type="button"
