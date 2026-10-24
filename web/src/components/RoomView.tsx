@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RoomActions, RoomState } from '../lib/types';
+import type {
+  PrincipalType,
+  RoomActions,
+  RoomState,
+  WorkspacePanelRequest,
+} from '../lib/types';
 import { useRoomVoice } from '../lib/useRoomVoice';
 import { presenceMeta } from '../lib/format';
 import { Avatar } from './Avatar';
@@ -26,6 +31,8 @@ interface RoomViewProps {
   socket: WebSocket | null;
   navOpen: boolean;
   onOpenNav: () => void;
+  onOpenMemberProfile: (type: PrincipalType, id: string) => void;
+  panelRequest: WorkspacePanelRequest | null;
 }
 
 export function RoomView({
@@ -35,6 +42,8 @@ export function RoomView({
   socket,
   navOpen,
   onOpenNav,
+  onOpenMemberProfile,
+  panelRequest,
 }: RoomViewProps) {
   const isCode = state.room.mode === 'code';
   const voice = useRoomVoice({
@@ -61,6 +70,12 @@ export function RoomView({
     setDetailsOpen(false);
     setSettingsOpen(false);
   }, [state.room.id]);
+
+  useEffect(() => {
+    if (!panelRequest || panelRequest.roomId !== state.room.id) return;
+    setPanelTab(panelRequest.tab);
+    setDetailsOpen(true);
+  }, [panelRequest, state.room.id]);
 
   useEffect(() => {
     if (pendingCount > previousPending.current) setAlertDismissed(false);
@@ -113,20 +128,18 @@ export function RoomView({
           <p className="room-topic">{state.room.topic || 'No topic set for this room.'}</p>
         </div>
         <div className="room-head-actions">
-          <button
-            type="button"
-            className="room-people"
-            title="People in this room"
-            aria-label={`View ${state.members.length} people in this room`}
-            onClick={() => openPanel('people')}
-          >
+          <div className="room-people" role="group" aria-label="People in this room">
             {headerPeople.map((member) => {
               const presence = presenceByPrincipal.get(`${member.type}:${member.id}`);
               const tone = presence ? presenceMeta[presence.status].tone : 'gray';
               return (
-                <span
+                <button
+                  type="button"
                   className={`room-person ${member.type === 'agent' ? 'agent' : ''}`}
                   key={`${member.type}-${member.id}`}
+                  title={`Open ${member.name}'s profile`}
+                  aria-label={`Open ${member.name}'s profile`}
+                  onClick={() => onOpenMemberProfile(member.type, member.id)}
                 >
                   <Avatar
                     name={member.name}
@@ -136,11 +149,20 @@ export function RoomView({
                     className="room-person-avatar"
                   />
                   <span className={`room-person-dot ${tone}`} aria-hidden="true" />
-                </span>
+                </button>
               );
             })}
-            {extraPeople > 0 ? <span className="room-people-more">+{extraPeople}</span> : null}
-          </button>
+            {extraPeople > 0 ? (
+              <button
+                type="button"
+                className="room-people-more"
+                title={`View all ${state.members.length} people`}
+                onClick={() => openPanel('people')}
+              >
+                +{extraPeople}
+              </button>
+            ) : null}
+          </div>
           {state.room.code ? (
             <button
               type="button"
@@ -218,9 +240,15 @@ export function RoomView({
             participants={state.voice ?? []}
             me={state.me}
             connected={connected}
+            onOpenProfile={onOpenMemberProfile}
           />
         </div>
-        <ChatPanel state={state} actions={actions} key={state.room.id} />
+        <ChatPanel
+          state={state}
+          actions={actions}
+          key={state.room.id}
+          onOpenProfile={onOpenMemberProfile}
+        />
       </div>
 
       {detailsOpen ? (
@@ -244,7 +272,13 @@ export function RoomView({
             <XIcon size={16} />
           </button>
         </div>
-        <RightPanel state={state} actions={actions} tab={panelTab} onTabChange={setPanelTab} />
+        <RightPanel
+          state={state}
+          actions={actions}
+          tab={panelTab}
+          onTabChange={setPanelTab}
+          onOpenProfile={onOpenMemberProfile}
+        />
       </div>
 
       {settingsOpen ? (

@@ -14,6 +14,18 @@ export type PresenceStatus =
   | 'waking'
   | 'unreachable';
 export type DeliveryMode = 'socket' | 'trigger';
+export type WorkspaceTab = 'people' | 'tasks' | 'repos' | 'activity';
+
+export interface ProfileTarget {
+  type: PrincipalType;
+  id: string;
+}
+
+export interface WorkspacePanelRequest {
+  roomId: string;
+  tab: WorkspaceTab;
+  nonce: number;
+}
 
 export interface Mention {
   type: PrincipalType;
@@ -347,6 +359,7 @@ export interface RoomActions {
   }): void;
   createTask(input: TaskInput): Promise<void>;
   updateTask(taskId: string, patch: TaskPatch): Promise<void>;
+  deleteTask(taskId: string): Promise<void>;
   addRepo(input: { name: string; url: string; branch: string }): Promise<void>;
   deleteRepo(repoId: string): Promise<void>;
   createAgent(input: {

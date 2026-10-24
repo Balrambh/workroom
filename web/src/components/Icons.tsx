@@ -235,6 +235,13 @@ export const ArrowLeftIcon = (props: IconProps) => (
   </Icon>
 );
 
+export const CameraIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M4 9a2.5 2.5 0 0 1 2.5-2.5h.9L8.6 4.3h6.8l1.2 2.2h.9A2.5 2.5 0 0 1 20 9v7.5a2.5 2.5 0 0 1-2.5 2.5h-11A2.5 2.5 0 0 1 4 16.5V9Z" />
+    <circle cx="12" cy="12.2" r="3.2" />
+  </Icon>
+);
+
 export const SparkleIcon = (props: IconProps) => (
   <Icon {...props}>
     <path d="M12 3.5 13.8 9l5.7 1.8-5.7 1.9L12 18.5l-1.8-5.8-5.7-1.9L10.2 9 12 3.5Z" />

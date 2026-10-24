@@ -1,20 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import type { Message, RoomActions, RoomState } from '../lib/types';
+import type { Message, PrincipalType, RoomActions, RoomState } from '../lib/types';
 import { clockTime } from '../lib/format';
 import { Avatar } from './Avatar';
 import {
   BellIcon,
   BellOffIcon,
   ChatIcon,
+  CheckIcon,
+  CopyIcon,
   LightbulbIcon,
   PencilIcon,
+  PlusIcon,
   SearchIcon,
   SendIcon,
   TerminalIcon,
   TrashIcon,
   XIcon,
 } from './Icons';
+import { FormattedMessage } from './FormattedMessage';
 import {
   desktopAlertsEnabled,
   notificationsSupported,
@@ -24,6 +28,7 @@ import {
 interface ChatPanelProps {
   state: RoomState;
   actions: RoomActions;
+  onOpenProfile: (type: PrincipalType, id: string) => void;
 }
 
 const KIND_OPTIONS = [
@@ -104,7 +109,7 @@ function dayLabel(iso: string): string {
   return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-export function ChatPanel({ state, actions }: ChatPanelProps) {
+export function ChatPanel({ state, actions, onOpenProfile }: ChatPanelProps) {
   const [text, setText] = useState(() => drafts.get(state.room.id) ?? '');
   const [kind, setKind] = useState<(typeof KIND_OPTIONS)[number]['value']>('chat');
   const listRef = useRef<HTMLDivElement | null>(null);
@@ -498,6 +503,10 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
             new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60 * 1000;
           const isAgent = message.senderType === 'agent';
           const senderAvatar = membersByPrincipal.get(`${message.senderType}:${message.senderId}`)?.avatar;
+          const profileSender =
+            message.senderType === 'user' || message.senderType === 'agent'
+              ? message.senderType
+              : null;
           const mentionsMe =
             message.senderType !== 'system' &&
             message.mentions.some((mention) => mention.type === state.me.type && mention.id === state.me.id);
@@ -518,18 +527,39 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
                 data-message-id={message.id}
               >
                 <div className="msg-avatar-wrap">
-                  {!sameSender ? (
-                    <Avatar
-                      name={message.senderName}
-                      type={isAgent ? 'agent' : 'user'}
-                      avatar={senderAvatar}
-                    />
+                  {!sameSender && profileSender ? (
+                    <button
+                      type="button"
+                      className="msg-avatar-btn"
+                      title={`Open ${message.senderName}'s profile`}
+                      aria-label={`Open ${message.senderName}'s profile`}
+                      onClick={() => onOpenProfile(profileSender, message.senderId)}
+                    >
+                      <Avatar
+                        name={message.senderName}
+                        type={isAgent ? 'agent' : 'user'}
+                        avatar={senderAvatar}
+                      />
+                    </button>
+                  ) : !sameSender ? (
+                    <Avatar name={message.senderName} type="user" avatar={senderAvatar} />
                   ) : null}
                 </div>
                 <div className="msg-body">
                   {!sameSender ? (
                     <div className="msg-head">
-                      <span className="msg-author">{message.senderName}</span>
+                      {profileSender ? (
+                        <button
+                          type="button"
+                          className="msg-author msg-author-btn"
+                          title={`Open ${message.senderName}'s profile`}
+                          onClick={() => onOpenProfile(profileSender, message.senderId)}
+                        >
+                          {message.senderName}
+                        </button>
+                      ) : (
+                        <span className="msg-author">{message.senderName}</span>
+                      )}
                       {isAgent ? <span className="tag tag-agent">agent</span> : null}
                       {message.senderRole === 'admin' ? <span className="tag tag-amber">admin</span> : null}
                       {message.kind !== 'chat' ? (

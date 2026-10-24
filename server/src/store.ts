@@ -1379,6 +1379,11 @@ export function updateTaskFields(
   return getTask(roomId, taskId)!;
 }
 
+export function deleteTask(roomId: string, taskId: string): boolean {
+  const result = db.prepare('DELETE FROM tasks WHERE id = ? AND room_id = ?').run(taskId, roomId);
+  return result.changes > 0;
+}
+
 /* ------------------------------ activity -------------------------------- */
 
 function mapActivity(row: Row): Activity {

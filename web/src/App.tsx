@@ -11,6 +11,8 @@ import type {
   JoinRequest,
   PresenceEntry,
   PresenceStatus,
+  PrincipalType,
+  ProfileTarget,
   Role,
   Room,
   RoomActions,
@@ -24,11 +26,14 @@ import type {
   TaskInput,
   TaskPatch,
   VoiceParticipant,
+  WorkspacePanelRequest,
+  WorkspaceTab,
 } from './lib/types';
 import { AuthScreen } from './components/AuthScreen';
 import { Sidebar } from './components/Sidebar';
 import { RoomView } from './components/RoomView';
 import { Modal } from './components/Modal';
+import { MemberProfileDialog } from './components/MemberProfileDialog';
 import { ProfileDialog } from './components/ProfileDialog';
 import { BranchIcon, GlobeIcon, HashIcon, MenuIcon, PlusIcon } from './components/Icons';
 import { showMentionNotification } from './lib/notifications';
@@ -63,6 +68,9 @@ export default function App({ initialCode }: AppProps = {}) {
   const [notice, setNotice] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [agentProfileId, setAgentProfileId] = useState<string | null>(null);
+  const [memberProfile, setMemberProfile] = useState<ProfileTarget | null>(null);
+  const [panelRequest, setPanelRequest] = useState<WorkspacePanelRequest | null>(null);
 
   const [newRoomOpen, setNewRoomOpen] = useState(false);
   const [roomName, setRoomName] = useState('');
@@ -208,7 +216,29 @@ export default function App({ initialCode }: AppProps = {}) {
               }
             : member,
         ),
+        voice: prev.voice.map((participant) =>
+          participant.type === profile.type && participant.id === profile.id
+            ? {
+                ...participant,
+                name: profile.name,
+                ...(profile.avatar ? { avatar: profile.avatar } : {}),
+              }
+            : participant,
+        ),
       };
+    });
+  }
+
+  function openMemberProfile(type: PrincipalType, id: string) {
+    setMemberProfile({ type, id });
+  }
+
+  function openWorkspace(tab: WorkspaceTab) {
+    if (!roomStateRef.current) return;
+    setPanelRequest({
+      roomId: roomStateRef.current.room.id,
+      tab,
+      nonce: Date.now(),
     });
   }
 
@@ -518,6 +548,17 @@ export default function App({ initialCode }: AppProps = {}) {
           if (payload.roomId !== active) break;
           setRoomState((prev) => (prev ? { ...prev, tasks: payload.tasks as Task[] } : prev));
           break;
+        case 'task.deleted':
+          if (payload.roomId !== active) break;
+          setRoomState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  tasks: prev.tasks.filter((t) => t.id !== (payload.taskId as string)),
+                }
+              : prev,
+          );
+          break;
         case 'members.updated':
           if (payload.roomId !== active) break;
           setRoomState((prev) => {
@@ -529,7 +570,14 @@ export default function App({ initialCode }: AppProps = {}) {
             return {
               ...prev,
               members,
-              me: mine ? { ...prev.me, role: mine.role, name: mine.name } : prev.me,
+              me: mine
+                ? {
+                    ...prev.me,
+                    role: mine.role,
+                    name: mine.name,
+                    avatar: mine.avatar ?? prev.me.avatar,
+                  }
+                : prev.me,
             };
           });
           break;
@@ -727,6 +775,13 @@ export default function App({ initialCode }: AppProps = {}) {
       await refreshIfOffline(roomId);
     },
 
+    async deleteTask(taskId: string) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.deleteTask(roomId, taskId);
+      await refreshIfOffline(roomId);
+    },
+
     async addRepo(input) {
       const roomId = activeIdRef.current;
       if (!roomId) return;
@@ -791,13 +846,28 @@ export default function App({ initialCode }: AppProps = {}) {
 
     async leaveRoom() {
       const roomId = activeIdRef.current;
+      const current = roomStateRef.current;
       if (!roomId) return;
-      await api.leaveRoom(roomId);
-      const remaining = roomsRef.current.filter((room) => room.id !== roomId);
-      setRooms(remaining);
+      const name = current?.room.name ?? 'this room';
+      if (
+        !window.confirm(
+          `Leave “${name}”?\n\nYou will return to the room's public page and can request access again later.`,
+        )
+      ) {
+        return;
+      }
+      try {
+        await api.leaveRoom(roomId);
+      } catch (error) {
+        showNotice(error instanceof Error ? error.message : 'Could not leave the room');
+        return;
+      }
+      const code = current?.room.code;
+      setRooms((prev) => prev.filter((room) => room.id !== roomId));
       setRoomState(null);
-      setActiveId(remaining[0]?.id ?? null);
-      showNotice('You left the room');
+      setActiveId(null);
+      setMemberProfile(null);
+      window.location.assign(code ? `/room/${code}` : '/room');
     },
 
     async deleteMessage(messageId: string) {
@@ -985,11 +1055,44 @@ export default function App({ initialCode }: AppProps = {}) {
     return <AuthScreen onAuth={handleAuth} initialMode="login" />;
   }
 
+  const profileMember =
+    memberProfile && roomState
+      ? roomState.members.find(
+          (member) =>
+            member.type === memberProfile.type && member.id === memberProfile.id,
+        ) ?? null
+      : null;
+  const profilePresence = profileMember
+    ? roomState?.presence.find(
+        (entry) => entry.type === profileMember.type && entry.id === profileMember.id,
+      )
+    : undefined;
+  const profileIsMe = Boolean(
+    profileMember &&
+      roomState &&
+      profileMember.type === roomState.me.type &&
+      profileMember.id === roomState.me.id,
+  );
+  const canEditProfile = Boolean(
+    profileMember &&
+      roomState &&
+      (profileIsMe ||
+        (profileMember.type === 'agent' && roomState.me.role === 'admin')),
+  );
+
+  function editProfileFromDialog() {
+    if (!profileMember) return;
+    setMemberProfile(null);
+    if (profileMember.type === 'agent') setAgentProfileId(profileMember.id);
+    else setProfileOpen(true);
+  }
+
   return (
     <div className="app">
       <Sidebar
         rooms={rooms}
         activeId={activeId}
+        state={roomState}
         user={session.user}
         connected={connected}
         open={navOpen}
@@ -998,9 +1101,15 @@ export default function App({ initialCode }: AppProps = {}) {
           setNavOpen(false);
           setProfileOpen(true);
         }}
+        onOpenMemberProfile={(type, id) => {
+          setNavOpen(false);
+          openMemberProfile(type, id);
+        }}
+        onOpenPanel={openWorkspace}
         onSelect={(roomId) => {
           setActiveId(roomId);
           setNavOpen(false);
+          setMemberProfile(null);
         }}
         onNewRoom={() => {
           setNavOpen(false);
@@ -1012,10 +1121,15 @@ export default function App({ initialCode }: AppProps = {}) {
           setJoinError(null);
           setJoinOpen(true);
         }}
+        onLeaveRoom={() => {
+          setNavOpen(false);
+          void actions.leaveRoom();
+        }}
         onLogout={() => {
           handleLogout();
           window.location.assign('/');
         }}
+        onNotice={showNotice}
       />
       {navOpen ? (
         <button
@@ -1060,6 +1174,8 @@ export default function App({ initialCode }: AppProps = {}) {
             socket={activeSocket}
             navOpen={navOpen}
             onOpenNav={() => setNavOpen(true)}
+            onOpenMemberProfile={openMemberProfile}
+            panelRequest={panelRequest}
           />
         ) : loadingRoom || !roomsLoaded ? (
           <div className="room-skeleton">
@@ -1225,10 +1341,31 @@ export default function App({ initialCode }: AppProps = {}) {
         </Modal>
       ) : null}
 
+      {profileMember && roomState ? (
+        <MemberProfileDialog
+          member={profileMember}
+          presence={profilePresence}
+          isMe={profileIsMe}
+          canEdit={canEditProfile}
+          onClose={() => setMemberProfile(null)}
+          onEdit={editProfileFromDialog}
+        />
+      ) : null}
+
       {profileOpen ? (
         <ProfileDialog
           mode="me"
           onClose={() => setProfileOpen(false)}
+          onSaved={handleProfileSaved}
+          onNotice={showNotice}
+        />
+      ) : null}
+
+      {agentProfileId ? (
+        <ProfileDialog
+          mode="agent"
+          agentId={agentProfileId}
+          onClose={() => setAgentProfileId(null)}
           onSaved={handleProfileSaved}
           onNotice={showNotice}
         />

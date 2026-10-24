@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { RoomState, VoiceParticipant } from '../lib/types';
+import type { PrincipalType, RoomState, VoiceParticipant } from '../lib/types';
 import type { VoiceController } from '../lib/useRoomVoice';
 import { avatarSrc } from '../lib/avatars';
 import { initial } from '../lib/format';
@@ -18,6 +18,7 @@ interface VoiceStageProps {
   participants: VoiceParticipant[];
   me: RoomState['me'];
   connected: boolean;
+  onOpenProfile: (type: PrincipalType, id: string) => void;
 }
 
 interface RemoteAudioProps {
@@ -69,10 +70,12 @@ function StagePerson({
   participant,
   isSelf,
   speaking,
+  onOpenProfile,
 }: {
   participant: VoiceParticipant;
   isSelf: boolean;
   speaking: boolean;
+  onOpenProfile: () => void;
 }) {
   const silenced = participant.muted || participant.deafened;
   const avatar = avatarSrc(participant.avatar);
@@ -82,7 +85,13 @@ function StagePerson({
       role="listitem"
       title={`${participant.name}${isSelf ? ' (you)' : ''}${participant.deafened ? ' · deafened' : participant.muted ? ' · muted' : ''}`}
     >
-      <span className="stage-avatar-wrap">
+      <button
+        type="button"
+        className="stage-avatar-wrap"
+        title={`Open ${participant.name}'s profile`}
+        aria-label={`Open ${participant.name}'s profile`}
+        onClick={onOpenProfile}
+      >
         <span className={`stage-avatar ${avatar ? 'has-image' : ''}`}>
           {avatar ? <img src={avatar} alt="" /> : initial(participant.name)}
         </span>
@@ -91,11 +100,11 @@ function StagePerson({
             {participant.deafened ? <HeadphonesOffIcon size={10} /> : <MicOffIcon size={10} />}
           </span>
         ) : null}
-      </span>
-      <span className="stage-person-name">
+      </button>
+      <button type="button" className="stage-person-name" onClick={onOpenProfile}>
         {participant.name}
         {isSelf ? <em>you</em> : null}
-      </span>
+      </button>
       <span className="visually-hidden">
         {speaking ? 'Speaking, ' : ''}
         {participant.deafened ? 'deafened' : participant.muted ? 'muted' : 'connected'}
@@ -104,7 +113,13 @@ function StagePerson({
   );
 }
 
-export function VoiceStage({ voice, participants, me, connected }: VoiceStageProps) {
+export function VoiceStage({
+  voice,
+  participants,
+  me,
+  connected,
+  onOpenProfile,
+}: VoiceStageProps) {
   const [devicesOpen, setDevicesOpen] = useState(false);
   const settingsRef = useRef<HTMLDivElement | null>(null);
 
@@ -242,6 +257,7 @@ export function VoiceStage({ voice, participants, me, connected }: VoiceStagePro
                   }}
                   isSelf={isSelf}
                   speaking={speakingSet.has(isSelf ? 'self' : participant.peerId)}
+                  onOpenProfile={() => onOpenProfile(participant.type, participant.id)}
                 />
               );
             })}

@@ -1,12 +1,18 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { FormEvent } from 'react';
+import type { ChangeEvent, FormEvent } from 'react';
 import { api } from '../lib/api';
-import { AVATAR_IDS, avatarSrc, randomAvatarId } from '../lib/avatars';
+import {
+  AVATAR_IDS,
+  avatarSrc,
+  fileToAvatar,
+  isCustomAvatar,
+  randomAvatarId,
+} from '../lib/avatars';
 import { profilePath } from '../lib/profile';
 import type { Profile } from '../lib/types';
 import { Modal } from './Modal';
 import { ProfileAvatar } from './ProfileAvatar';
-import { ArrowUpRightIcon, CheckIcon, CopyIcon, SparkleIcon } from './Icons';
+import { ArrowUpRightIcon, CameraIcon, CheckIcon, CopyIcon, SparkleIcon } from './Icons';
 
 interface ProfileDialogProps {
   mode: 'me' | 'agent';
@@ -54,6 +60,8 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [retryKey, setRetryKey] = useState(0);
+  const [uploadingAvatar, setUploadingAvatar] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
@@ -92,12 +100,29 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
   function patchDraft(patch: Partial<Draft>) {
     setDraft((current) => (current ? { ...current, ...patch } : current));
     if (error) setError(null);
+    if (avatarError) setAvatarError(null);
   }
 
   function shuffleAvatar() {
     let next = randomAvatarId();
     while (next === draft?.avatar && AVATAR_IDS.length > 1) next = randomAvatarId();
     patchDraft({ avatar: next });
+  }
+
+  async function uploadAvatar(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+    setAvatarError(null);
+    setUploadingAvatar(true);
+    try {
+      const avatar = await fileToAvatar(file);
+      patchDraft({ avatar });
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : 'Could not use that image');
+    } finally {
+      setUploadingAvatar(false);
+    }
   }
 
   async function copyPublicLink() {
@@ -202,7 +227,9 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
   }
 
   const canSave =
-    Boolean(draft && draft.name.trim() && handleIsValid(draft.handle.trim().toLowerCase())) && !saving;
+    Boolean(draft && draft.name.trim() && handleIsValid(draft.handle.trim().toLowerCase())) &&
+    !saving &&
+    !uploadingAvatar;
   const canChangePassword =
     currentPassword.length > 0 && newPassword.length >= 8 && confirmPassword.length > 0;
 
@@ -255,7 +282,7 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
               <div>
                 <span className="section-label">Profile picture</span>
                 <p className="profile-field-hint">
-                  Choose one of 30 RoomForge portraits. Agents get one at random when they join.
+                  Pick a portrait or upload your own. Photos are center-cropped into a square.
                 </p>
               </div>
               <button type="button" className="btn btn-quiet btn-tiny" onClick={shuffleAvatar}>
@@ -284,7 +311,43 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
                   </button>
                 );
               })}
+              <label
+                className={`avatar-choice avatar-upload-choice ${uploadingAvatar ? 'busy' : ''} ${
+                  isCustomAvatar(draft.avatar) ? 'selected' : ''
+                }`}
+                title={
+                  isCustomAvatar(draft.avatar)
+                    ? 'Replace your uploaded photo'
+                    : 'Upload a photo from your device'
+                }
+              >
+                {isCustomAvatar(draft.avatar) ? (
+                  <img src={draft.avatar} alt="" />
+                ) : uploadingAvatar ? (
+                  <span className="avatar-choice-spinner" aria-hidden="true" />
+                ) : (
+                  <CameraIcon size={19} />
+                )}
+                <input
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp"
+                  aria-label="Upload a profile photo"
+                  disabled={uploadingAvatar}
+                  onChange={uploadAvatar}
+                />
+                {isCustomAvatar(draft.avatar) ? (
+                  <span className="avatar-choice-check" aria-hidden="true">
+                    <CheckIcon size={11} />
+                  </span>
+                ) : (
+                  <span className="avatar-upload-label">Upload</span>
+                )}
+              </label>
             </div>
+            {avatarError ? <p className="form-error">{avatarError}</p> : null}
+            <p className="profile-field-hint">
+              PNG, JPEG, or WebP up to 8 MB. Your photo never leaves RoomForge.
+            </p>
           </div>
 
           <div className="profile-edit-section">

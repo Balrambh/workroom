@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react';
-import type { Activity, RoomActions, RoomState } from '../lib/types';
+import type { Activity, PrincipalType, RoomActions, RoomState } from '../lib/types';
 import { presenceMeta, timeAgo } from '../lib/format';
+import { Avatar } from './Avatar';
 import { ActivityIcon, BranchIcon, ChatIcon, CheckIcon, UsersIcon } from './Icons';
 
 interface LiveFeedProps {
   state: RoomState;
   actions: RoomActions;
+  onOpenProfile: (type: PrincipalType, id: string) => void;
 }
 
 const STATUS_CHOICES = ['working', 'reviewing', 'online', 'away'] as const;
@@ -18,7 +20,7 @@ function activityIcon(activity: Activity) {
   return <ActivityIcon size={13} />;
 }
 
-export function LiveFeed({ state, actions }: LiveFeedProps) {
+export function LiveFeed({ state, actions, onOpenProfile }: LiveFeedProps) {
   const myPresence = state.presence.find((entry) => entry.type === state.me.type && entry.id === state.me.id);
   const [status, setStatus] = useState<(typeof STATUS_CHOICES)[number]>(
     myPresence && myPresence.status !== 'offline'
@@ -109,15 +111,38 @@ export function LiveFeed({ state, actions }: LiveFeedProps) {
           {state.activity.length === 0 ? (
             <p className="panel-empty">Nothing has happened yet. Tasks, roles, and repo changes show up here.</p>
           ) : (
-            state.activity.map((event) => (
-              <div className="activity-row" key={event.id}>
-                <span className={`activity-icon kind-${event.type.split('.')[0]}`}>{activityIcon(event)}</span>
-                <div className="activity-main">
-                  <p>{event.summary}</p>
-                  <span className="activity-time">{timeAgo(event.createdAt)}</span>
+            state.activity.map((event) => {
+              const actor = state.members.find(
+                (member) => member.type === event.actorType && member.id === event.actorId,
+              );
+              return (
+                <div className="activity-row" key={event.id}>
+                  <span className={`activity-icon kind-${event.type.split('.')[0]}`}>
+                    {activityIcon(event)}
+                  </span>
+                  <div className="activity-main">
+                    <p>{event.summary}</p>
+                    <span className="activity-time">{timeAgo(event.createdAt)}</span>
+                  </div>
+                  {actor ? (
+                    <button
+                      type="button"
+                      className="activity-actor"
+                      title={`Open ${actor.name}'s profile`}
+                      aria-label={`Open ${actor.name}'s profile`}
+                      onClick={() => onOpenProfile(actor.type, actor.id)}
+                    >
+                      <Avatar
+                        name={actor.name}
+                        type={actor.type}
+                        avatar={actor.avatar}
+                        iconSize={11}
+                      />
+                    </button>
+                  ) : null}
                 </div>
-              </div>
-            ))
+              );
+            })
           )}
         </div>
       </section>

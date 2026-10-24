@@ -14,7 +14,7 @@ import {
   verifyPassword,
 } from './auth.js';
 import type { AuthedRequest } from './auth.js';
-import { isAvatarId } from './avatars.js';
+import { isAvatarValue, MAX_AVATAR_LENGTH } from './avatars.js';
 import { HttpError } from './errors.js';
 import { handleValidationError, normalizeHandle } from './handles.js';
 import * as hub from './hub.js';
@@ -564,7 +564,10 @@ const profileWebsiteSchema = z
 const profileAvatarSchema = z
   .string()
   .trim()
-  .refine(isAvatarId, { message: 'Choose one of the 30 preset profile pictures' });
+  .max(MAX_AVATAR_LENGTH, { message: 'Profile images must be under 120 KB' })
+  .refine(isAvatarValue, {
+    message: 'Choose a preset profile picture or upload a PNG, JPEG, or WebP image',
+  });
 
 const userProfilePatchSchema = z
   .object({
@@ -1607,6 +1610,29 @@ router.patch('/rooms/:roomId/tasks/:taskId', (req, res) => {
   hub.broadcast(req.params.roomId, { type: 'task.updated', task: updated });
   emitActivity(req.params.roomId, activity);
   res.json(updated);
+});
+
+router.delete('/rooms/:roomId/tasks/:taskId', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  const membership = membershipOrThrow(req.params.roomId, principal);
+  if (membership.role === 'viewer') throw new HttpError(403, 'Viewers have read-only access');
+
+  const task = store.getTask(req.params.roomId, req.params.taskId);
+  if (!task) throw new HttpError(404, 'Task not found');
+
+  const isAdmin = membership.role === 'admin';
+  const isCreator = task.createdByType === principal.type && task.createdById === principal.id;
+  if (!isAdmin && !isCreator && membership.role !== 'member') {
+    throw new HttpError(403, 'You do not have permission to delete this task');
+  }
+
+  store.deleteTask(req.params.roomId, task.id);
+  const summary = `${principal.name} deleted task “${task.title}”.`;
+  const activity = store.logActivity(req.params.roomId, principal, 'task.deleted', summary, { taskId: task.id });
+  hub.broadcast(req.params.roomId, { type: 'task.deleted', taskId: task.id });
+  emitTasks(req.params.roomId);
+  emitActivity(req.params.roomId, activity);
+  res.json({ ok: true });
 });
 
 /* ------------------------------ helpers --------------------------------- */

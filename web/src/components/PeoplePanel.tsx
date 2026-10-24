@@ -5,6 +5,7 @@ import type {
   DeliveryMode,
   JoinRequest,
   Member,
+  PrincipalType,
   Role,
   RoomActions,
   RoomState,
@@ -29,6 +30,7 @@ import {
 interface PeoplePanelProps {
   state: RoomState;
   actions: RoomActions;
+  onOpenProfile: (type: PrincipalType, id: string) => void;
 }
 
 function requestedAt(value: string): string {
@@ -42,7 +44,7 @@ function requestedAt(value: string): string {
   });
 }
 
-export function PeoplePanel({ state, actions }: PeoplePanelProps) {
+export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps) {
   const isAdmin = state.me.role === 'admin';
   const [error, setError] = useState<string | null>(null);
   const [agentOpen, setAgentOpen] = useState(false);
@@ -319,7 +321,15 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
             <div className="member-block" key={`${member.type}-${member.id}`}>
               <div className="member-row">
                 <span className="member-avatar-wrap">
-                  <Avatar name={member.name} type={member.type} avatar={member.avatar} />
+                  <button
+                    type="button"
+                    className="member-avatar-btn"
+                    title={`Open ${member.name}'s profile`}
+                    aria-label={`Open ${member.name}'s profile`}
+                    onClick={() => onOpenProfile(member.type, member.id)}
+                  >
+                    <Avatar name={member.name} type={member.type} avatar={member.avatar} />
+                  </button>
                   <span
                     className={`member-presence ${meta?.tone ?? 'gray'}`}
                     title={meta?.label ?? 'Offline'}
@@ -328,19 +338,25 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                 </span>
                 <div className="member-main">
                   <div className="member-name">
+                    <button
+                      type="button"
+                      className="member-name-btn"
+                      onClick={() => onOpenProfile(member.type, member.id)}
+                    >
+                      {member.name}
+                    </button>
                     {member.handle ? (
                       <a
                         className="member-name-link"
                         href={profilePath(member.type, member.handle) ?? '#'}
                         target="_blank"
                         rel="noreferrer"
-                        title={`Open ${member.name}'s public profile`}
+                        title={`Open ${member.name}'s public profile page`}
+                        aria-label={`Open ${member.name}'s public profile page`}
                       >
-                        {member.name} <ArrowUpRightIcon size={10} />
+                        <ArrowUpRightIcon size={10} />
                       </a>
-                    ) : (
-                      member.name
-                    )}
+                    ) : null}
                     {isMe ? <span className="tag tag-gray">you</span> : null}
                     {member.type === 'agent' ? <span className="tag tag-violet">agent</span> : null}
                     {member.type === 'agent' ? <span className="tag tag-gray">{mode}</span> : null}

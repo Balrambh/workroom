@@ -272,6 +272,10 @@ export const api = {
   updateTask(roomId: string, taskId: string, patch: TaskPatch): Promise<Task> {
     return request(`/rooms/${roomId}/tasks/${taskId}`, { method: 'PATCH', body: patch });
   },
+
+  deleteTask(roomId: string, taskId: string): Promise<{ ok: boolean }> {
+    return request(`/rooms/${roomId}/tasks/${taskId}`, { method: 'DELETE' });
+  },
 };
 
 export type { SessionUser };

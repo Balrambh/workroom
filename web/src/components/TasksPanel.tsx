@@ -2,11 +2,13 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PrincipalType, RoomActions, RoomState, Task, TaskStatus } from '../lib/types';
 import { parsePaths, taskMeta, timeAgo } from '../lib/format';
-import { BranchIcon, PlusIcon, SearchIcon, XIcon } from './Icons';
+import { Avatar } from './Avatar';
+import { BranchIcon, PlusIcon, SearchIcon, TrashIcon, XIcon } from './Icons';
 
 interface TasksPanelProps {
   state: RoomState;
   actions: RoomActions;
+  onOpenProfile: (type: PrincipalType, id: string) => void;
 }
 
 const GROUP_ORDER: TaskStatus[] = ['doing', 'review', 'todo', 'done'];
@@ -27,7 +29,7 @@ function splitPrincipal(value: string): { type: PrincipalType | null; id: string
   return { type: type as PrincipalType, id };
 }
 
-export function TasksPanel({ state, actions }: TasksPanelProps) {
+export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
   const me = state.me;
   const isAdmin = me.role === 'admin';
   const isViewer = me.role === 'viewer';
@@ -115,6 +117,17 @@ export function TasksPanel({ state, actions }: TasksPanelProps) {
       await actions.updateTask(task.id, patch);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not update the task');
+    }
+  }
+
+  async function deleteTask(task: Task) {
+    if (!window.confirm(`Delete task “${task.title}”?`)) return;
+    setError(null);
+    try {
+      await actions.deleteTask(task.id);
+      actions.notify(`Deleted task “${task.title}”`);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete the task');
     }
   }
 
@@ -293,16 +306,31 @@ export function TasksPanel({ state, actions }: TasksPanelProps) {
               {tasks.map((task) => {
                 const canManage =
                   isAdmin || (task.createdByType === me.type && task.createdById === me.id);
+                const canDelete = canManage || !isViewer;
                 const isAssignee = task.assigneeType === me.type && task.assigneeId === me.id;
                 const canChangeStatus = canManage || isAssignee;
                 const canClaim = !task.assigneeId && !isViewer && !canManage;
                 const meta = taskMeta[task.status];
                 const paths = parsePaths(task.paths);
+                const assigneeMember = state.members.find(
+                  (member) => member.type === task.assigneeType && member.id === task.assigneeId,
+                );
                 return (
                   <article className={`task-card tone-${meta.tone}`} key={task.id}>
                     <div className="task-card-head">
                       <span className={`task-dot ${meta.tone}`} />
                       <h4>{task.title}</h4>
+                      {canDelete ? (
+                        <button
+                          type="button"
+                          className="task-delete-btn"
+                          title="Delete task"
+                          aria-label={`Delete task ${task.title}`}
+                          onClick={() => deleteTask(task)}
+                        >
+                          <TrashIcon size={12} />
+                        </button>
+                      ) : null}
                     </div>
                     <div className="task-meta">
                       {task.repoName ? (
@@ -313,7 +341,14 @@ export function TasksPanel({ state, actions }: TasksPanelProps) {
                       ) : task.branch ? (
                         <span className="chip">{task.branch}</span>
                       ) : null}
-                      <span>by {task.createdByName}</span>
+                      <button
+                        type="button"
+                        className="task-by"
+                        title={`Open ${task.createdByName}'s profile`}
+                        onClick={() => onOpenProfile(task.createdByType, task.createdById)}
+                      >
+                        by {task.createdByName}
+                      </button>
                       <span>{timeAgo(task.updatedAt)}</span>
                     </div>
                     {task.description ? <p className="task-desc">{task.description}</p> : null}
@@ -343,10 +378,23 @@ export function TasksPanel({ state, actions }: TasksPanelProps) {
                               </option>
                             ))}
                           </select>
+                        ) : task.assigneeType && task.assigneeId ? (
+                          <button
+                            type="button"
+                            className="assignee-name assignee-name-btn"
+                            title={`Open ${task.assigneeName ?? 'assignee'}'s profile`}
+                            onClick={() => onOpenProfile(task.assigneeType!, task.assigneeId!)}
+                          >
+                            <Avatar
+                              name={task.assigneeName ?? '?'}
+                              type={task.assigneeType}
+                              avatar={assigneeMember?.avatar}
+                              iconSize={10}
+                            />
+                            {task.assigneeName}
+                          </button>
                         ) : (
-                          <span className={task.assigneeName ? 'assignee-name' : 'assignee-name muted'}>
-                            {task.assigneeName ?? 'Unassigned'}
-                          </span>
+                          <span className="assignee-name muted">Unassigned</span>
                         )}
                       </div>
                       <div className="task-status-control">

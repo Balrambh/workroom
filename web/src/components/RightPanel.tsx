@@ -1,21 +1,28 @@
 import type { ReactNode } from 'react';
-import type { RoomActions, RoomState } from '../lib/types';
+import type { PrincipalType, RoomActions, RoomState, WorkspaceTab } from '../lib/types';
 import { ActivityIcon, BranchIcon, CheckIcon, UsersIcon } from './Icons';
 import { LiveFeed } from './LiveFeed';
 import { TasksPanel } from './TasksPanel';
 import { ReposPanel } from './ReposPanel';
 import { PeoplePanel } from './PeoplePanel';
 
-export type PanelTab = 'people' | 'tasks' | 'repos' | 'activity';
+export type PanelTab = WorkspaceTab;
 
 interface RightPanelProps {
   state: RoomState;
   actions: RoomActions;
   tab: PanelTab;
   onTabChange: (tab: PanelTab) => void;
+  onOpenProfile: (type: PrincipalType, id: string) => void;
 }
 
-export function RightPanel({ state, actions, tab, onTabChange }: RightPanelProps) {
+export function RightPanel({
+  state,
+  actions,
+  tab,
+  onTabChange,
+  onOpenProfile,
+}: RightPanelProps) {
   const openTasks = state.tasks.filter((task) => task.status !== 'done').length;
   const isCode = state.room.mode === 'code';
   const pendingRequests = state.me.role === 'admin' ? state.joinRequests?.length ?? 0 : 0;
@@ -59,10 +66,16 @@ export function RightPanel({ state, actions, tab, onTabChange }: RightPanelProps
         ))}
       </div>
 
-      {activeTab === 'people' ? <PeoplePanel state={state} actions={actions} /> : null}
-      {activeTab === 'tasks' ? <TasksPanel state={state} actions={actions} /> : null}
+      {activeTab === 'people' ? (
+        <PeoplePanel state={state} actions={actions} onOpenProfile={onOpenProfile} />
+      ) : null}
+      {activeTab === 'tasks' ? (
+        <TasksPanel state={state} actions={actions} onOpenProfile={onOpenProfile} />
+      ) : null}
       {activeTab === 'repos' ? <ReposPanel state={state} actions={actions} /> : null}
-      {activeTab === 'activity' ? <LiveFeed state={state} actions={actions} /> : null}
+      {activeTab === 'activity' ? (
+        <LiveFeed state={state} actions={actions} onOpenProfile={onOpenProfile} />
+      ) : null}
     </aside>
   );
 }
