@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#84CC16"/><stop offset="1" stop-color="#166534"/></linearGradient>
+<radialGradient id="glow" cx="0.22" cy="0.12" r="0.95"><stop offset="0" stop-color="#fff" stop-opacity=".24"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="96" height="96" fill="url(#bg)"/>
+<rect width="96" height="96" fill="url(#glow)"/>
+<circle cx="12" cy="16" r="2.2" fill="#fff" opacity=".16"/><circle cx="24" cy="9" r="2.2" fill="#fff" opacity=".16"/><circle cx="84" cy="18" r="2.2" fill="#fff" opacity=".16"/><circle cx="77" cy="32" r="2.2" fill="#fff" opacity=".16"/><circle cx="12" cy="76" r="2.2" fill="#fff" opacity=".16"/><circle cx="24" cy="87" r="2.2" fill="#fff" opacity=".16"/><circle cx="87" cy="74" r="2.2" fill="#fff" opacity=".16"/><circle cx="74" cy="88" r="2.2" fill="#fff" opacity=".16"/>
+
+      <path d="M47 33c0-8 0-11 1-15" stroke="#BEF264" stroke-width="3" stroke-linecap="round"/>
+      <path d="M48 23C39 24 33 18 33 11c9-1 15 5 15 12z" fill="#BEF264"/>
+      <path d="M50 21c8 1 13-4 13-11-8-1-13 4-13 11z" fill="#65A30D"/>
+      <circle cx="48" cy="55" r="23" fill="#FFF8ED"/>
+      <path d="M34 56q5-7 10 0" stroke="#1B2436" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M52 56q5-7 10 0" stroke="#1B2436" stroke-width="3.2" fill="none" stroke-linecap="round"/><path d="M41 61q7 10 14 0z" fill="#1B2436"/><path d="M45 67q3 4 6 0z" fill="#FDA4AF"/><circle cx="32" cy="60" r="4" fill="#FDA4AF" opacity=".85"/><circle cx="64" cy="60" r="4" fill="#FDA4AF" opacity=".85"/>
+</svg>

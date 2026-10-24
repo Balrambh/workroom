@@ -14,6 +14,7 @@ import {
   verifyPassword,
 } from './auth.js';
 import type { AuthedRequest } from './auth.js';
+import { isAvatarId } from './avatars.js';
 import { HttpError } from './errors.js';
 import { handleValidationError, normalizeHandle } from './handles.js';
 import * as hub from './hub.js';
@@ -139,6 +140,7 @@ function publicMembers(roomId: string) {
     role: member.role,
     description: member.description,
     handle: member.handle,
+    avatar: member.avatar,
   }));
 }
 
@@ -253,7 +255,13 @@ router.post('/auth/register', (req, res) => {
   setSessionCookie(res, token);
   res.status(201).json({
     token,
-    user: { id: user.id, name: user.name, email: user.email, handle: user.handle ?? '' },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      handle: user.handle ?? '',
+      avatar: user.avatar ?? '',
+    },
   });
 });
 
@@ -270,7 +278,13 @@ router.post('/auth/login', (req, res) => {
   setSessionCookie(res, token);
   res.json({
     token,
-    user: { id: user.id, name: user.name, email: user.email, handle: user.handle ?? '' },
+    user: {
+      id: user.id,
+      name: user.name,
+      email: user.email,
+      handle: user.handle ?? '',
+      avatar: user.avatar ?? '',
+    },
   });
 });
 
@@ -547,6 +561,11 @@ const profileWebsiteSchema = z
     message: 'Use a full URL beginning with https://',
   });
 
+const profileAvatarSchema = z
+  .string()
+  .trim()
+  .refine(isAvatarId, { message: 'Choose one of the 30 preset profile pictures' });
+
 const userProfilePatchSchema = z
   .object({
     name: z.string().trim().min(1).max(48).optional(),
@@ -555,6 +574,7 @@ const userProfilePatchSchema = z
     bio: z.string().trim().max(600).optional(),
     location: z.string().trim().max(80).optional(),
     website: profileWebsiteSchema.optional(),
+    avatar: profileAvatarSchema.optional(),
     showRooms: z.boolean().optional(),
   })
   .strict();
@@ -581,6 +601,7 @@ const agentProfilePatchSchema = z
     headline: z.string().trim().max(120).optional(),
     bio: z.string().trim().max(900).optional(),
     website: profileWebsiteSchema.optional(),
+    avatar: profileAvatarSchema.optional(),
     capabilities: agentCapabilitiesSchema.optional(),
   })
   .strict();
@@ -614,7 +635,7 @@ router.patch('/me/profile', (req, res) => {
     if (body.handle) assertProfileHandle(body.handle, { type: 'user', id: principal.id });
     const profile = store.updateUserProfile(principal.id, body);
     if (!profile) throw new HttpError(404, 'Profile not found');
-    hub.syncPrincipalProfile('user', principal.id, profile.name, profile.handle);
+    hub.syncPrincipalProfile('user', principal.id, profile.name, profile.handle, profile.avatar);
     syncUserProfileRooms(principal.id);
     res.json({ profile });
     return;
@@ -629,10 +650,11 @@ router.patch('/me/profile', (req, res) => {
     headline: body.headline,
     bio: body.bio,
     website: body.website,
+    avatar: body.avatar,
     ...(capabilities !== undefined ? { capabilities } : {}),
   });
   if (!profile) throw new HttpError(404, 'Profile not found');
-  hub.syncPrincipalProfile('agent', principal.id, profile.name, profile.handle);
+  hub.syncPrincipalProfile('agent', principal.id, profile.name, profile.handle, profile.avatar);
   const roomId = store.getAgentRoom(principal.id);
   if (roomId) hub.broadcastMembers(roomId);
   res.json({ profile });
@@ -685,10 +707,11 @@ router.patch('/agents/:agentId/profile', (req, res) => {
     headline: body.headline,
     bio: body.bio,
     website: body.website,
+    avatar: body.avatar,
     ...(capabilities !== undefined ? { capabilities } : {}),
   });
   if (!profile) throw new HttpError(404, 'Agent not found');
-  hub.syncPrincipalProfile('agent', req.params.agentId, profile.name, profile.handle);
+  hub.syncPrincipalProfile('agent', req.params.agentId, profile.name, profile.handle, profile.avatar);
   hub.broadcastMembers(roomId);
   res.json({ profile });
 });
@@ -1044,6 +1067,18 @@ router.get('/rooms/:roomId/messages', (req, res) => {
   res.json({ messages: store.listMessages(req.params.roomId, query.before, query.limit) });
 });
 
+router.get('/rooms/:roomId/messages/search', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  membershipOrThrow(req.params.roomId, principal);
+  const query = z
+    .object({
+      q: z.string().trim().min(2).max(100),
+      limit: z.coerce.number().int().min(1).max(50).optional().default(30),
+    })
+    .parse(req.query);
+  res.json({ messages: store.searchMessages(req.params.roomId, query.q, query.limit) });
+});
+
 router.post('/rooms/:roomId/messages', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   writerOrThrow(req.params.roomId, principal);
@@ -1069,6 +1104,19 @@ router.post('/rooms/:roomId/messages', (req, res) => {
     explicitMentions: body.mentions,
   });
   res.status(duplicate ? 200 : 201).json(message);
+});
+
+router.patch('/rooms/:roomId/messages/:messageId', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  writerOrThrow(req.params.roomId, principal);
+  const body = z.object({ content: z.string().trim().min(1).max(4000) }).parse(req.body);
+  const message = hub.editRoomMessage({
+    roomId: req.params.roomId,
+    principal,
+    messageId: req.params.messageId,
+    content: body.content,
+  });
+  res.json(message);
 });
 
 router.delete('/rooms/:roomId/messages/:messageId', (req, res) => {
@@ -1191,7 +1239,12 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
     if (!request.user_id) throw new HttpError(400, 'This request has no user attached');
     const user = store.findUserById(request.user_id);
     if (!user) throw new HttpError(410, 'The requester no longer has an account');
-    const requester: Principal = { type: 'user', id: user.id, name: user.name };
+    const requester: Principal = {
+      type: 'user',
+      id: user.id,
+      name: user.name,
+      ...(user.avatar ? { avatar: user.avatar } : {}),
+    };
     store.addMember(room.id, requester, 'member');
     store.approveJoinRequest(request.id, principal.id);
     member = store.listMembers(room.id).find((candidate) => candidate.type === 'user' && candidate.id === user.id) ?? null;
@@ -1217,7 +1270,12 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
 
   if (agentToken && member) {
     const origin = publicOrigin(req);
-    const agentPrincipal: Principal = { type: 'agent', id: member.id, name: member.name };
+    const agentPrincipal: Principal = {
+      type: 'agent',
+      id: member.id,
+      name: member.name,
+      ...(member.avatar ? { avatar: member.avatar } : {}),
+    };
     hub.promoteJoinRequest(request.id, agentPrincipal, {
       ...agentBriefing(
         origin,
@@ -1259,6 +1317,7 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
           id: member.id,
           name: member.name,
           role: member.role,
+          avatar: member.avatar,
           ...(member.type === 'agent'
             ? { deliveryMode: request.delivery_mode ?? 'socket', triggerUrl: request.trigger_url ?? null }
             : {}),

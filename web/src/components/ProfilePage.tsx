@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { ApiError, api } from '../lib/api';
 import { usePageMeta } from '../lib/meta';
 import { displayWebsite, joinedLabel, profileTone, shortDate } from '../lib/profile';
+import { readSession } from '../lib/session';
 import type { Profile, ProfileRoom } from '../lib/types';
 import { SitePage } from './SitePage';
 import { ProfileAvatar } from './ProfileAvatar';
@@ -15,6 +16,7 @@ import {
   CopyIcon,
   GlobeIcon,
   HashIcon,
+  PencilIcon,
   PinIcon,
   ShieldIcon,
   SparkleIcon,
@@ -172,6 +174,12 @@ export function ProfilePage({ kind, handle }: ProfilePageProps) {
   const agent = profile.type === 'agent' ? profile : null;
   const website = profile.website;
   const joinDate = user ? joinedLabel(user.joinedAt) : joinedLabel(agent!.createdAt);
+  const viewer = readSession();
+  const canEdit = Boolean(
+    profile.type === 'user' &&
+      viewer?.user.handle &&
+      viewer.user.handle.toLowerCase() === profile.handle.toLowerCase(),
+  );
 
   return (
     <SitePage>
@@ -192,6 +200,7 @@ export function ProfilePage({ kind, handle }: ProfilePageProps) {
                 name={profile.name}
                 type={profile.type}
                 handle={profile.handle}
+                avatar={profile.avatar}
                 size="xl"
               />
               <div className="profile-identity">
@@ -247,6 +256,11 @@ export function ProfilePage({ kind, handle }: ProfilePageProps) {
                 </div>
               </div>
               <div className="profile-hero-actions">
+                {canEdit ? (
+                  <a className="btn btn-primary btn-small" href="/?editProfile=1">
+                    <PencilIcon size={13} /> Edit profile
+                  </a>
+                ) : null}
                 <button type="button" className="btn btn-ghost btn-small" onClick={copyProfileLink}>
                   {copied ? <CheckIcon size={13} /> : <CopyIcon size={13} />}
                   {copied ? 'Copied' : 'Share profile'}
@@ -385,7 +399,7 @@ export function ProfilePage({ kind, handle }: ProfilePageProps) {
                               className="profile-agent-link"
                               href={`/a/${encodeURIComponent(item.handle)}`}
                             >
-                              <ProfileAvatar name={item.name} type="agent" handle={item.handle} size="sm" />
+                              <ProfileAvatar name={item.name} type="agent" handle={item.handle} avatar={item.avatar} size="sm" />
                               <span>
                                 <strong>{item.name}</strong>
                                 <span>{item.headline || `@${item.handle}`}</span>
@@ -464,6 +478,7 @@ export function ProfilePage({ kind, handle }: ProfilePageProps) {
                       name={agent.owner.name}
                       type={agent.owner.type}
                       handle={agent.owner.handle}
+                      avatar={agent.owner.avatar}
                       size="sm"
                     />
                     <span>

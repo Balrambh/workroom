@@ -1,8 +1,25 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { Message, RoomActions, RoomState } from '../lib/types';
-import { clockTime, initial } from '../lib/format';
-import { BotIcon, ChatIcon, LightbulbIcon, SendIcon, TerminalIcon, TrashIcon } from './Icons';
+import { clockTime } from '../lib/format';
+import { Avatar } from './Avatar';
+import {
+  BellIcon,
+  BellOffIcon,
+  ChatIcon,
+  LightbulbIcon,
+  PencilIcon,
+  SearchIcon,
+  SendIcon,
+  TerminalIcon,
+  TrashIcon,
+  XIcon,
+} from './Icons';
+import {
+  desktopAlertsEnabled,
+  notificationsSupported,
+  setDesktopAlerts,
+} from '../lib/notifications';
 
 interface ChatPanelProps {
   state: RoomState;
@@ -57,6 +74,26 @@ function highlightMentions(content: string, name: string): ReactNode {
   return nodes;
 }
 
+function highlightQuery(content: string, query: string): ReactNode {
+  if (!query) return content;
+  const pattern = new RegExp(`(${escapeRegExp(query)})`, 'gi');
+  return content.split(pattern).map((part, index) =>
+    index % 2 === 1 ? (
+      <mark className="search-hit" key={index}>
+        {part}
+      </mark>
+    ) : (
+      part
+    ),
+  );
+}
+
+function typingLabel(names: string[]): string {
+  if (names.length === 1) return `${names[0]} is typing…`;
+  if (names.length === 2) return `${names[0]} and ${names[1]} are typing…`;
+  return `${names[0]} and ${names.length - 1} others are typing…`;
+}
+
 function dayLabel(iso: string): string {
   const date = new Date(iso);
   const today = new Date();
@@ -72,12 +109,73 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
   const [kind, setKind] = useState<(typeof KIND_OPTIONS)[number]['value']>('chat');
   const listRef = useRef<HTMLDivElement | null>(null);
   const inputRef = useRef<HTMLTextAreaElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const stickToBottom = useRef(true);
   const preserveScroll = useRef<{ height: number; count: number } | null>(null);
+  const typingHeartbeat = useRef<ReturnType<typeof setInterval> | null>(null);
+  const typingActive = useRef(false);
   const [hasOlder, setHasOlder] = useState(state.messages.length >= 80);
   const [loadingOlder, setLoadingOlder] = useState(false);
+  const [alertsOn, setAlertsOn] = useState(desktopAlertsEnabled);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState<Message[] | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [highlightId, setHighlightId] = useState<string | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
+  const [savingEdit, setSavingEdit] = useState(false);
   const readOnly = state.me.role === 'viewer';
   const activeOption = KIND_OPTIONS.find((option) => option.value === kind) ?? KIND_OPTIONS[0];
+  const membersByPrincipal = new Map(
+    state.members.map((member) => [`${member.type}:${member.id}`, member]),
+  );
+  const typers = (state.typing ?? []).filter(
+    (entry) =>
+      entry.expiresAt > Date.now() &&
+      !(entry.type === state.me.type && entry.id === state.me.id),
+  );
+
+  useEffect(() => {
+    if (searchOpen) searchInputRef.current?.focus();
+  }, [searchOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (typingHeartbeat.current) clearInterval(typingHeartbeat.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+    const query = searchQuery.trim();
+    if (query.length < 2) {
+      setSearchResults(null);
+      setSearching(false);
+      return;
+    }
+    let cancelled = false;
+    setSearching(true);
+    const timer = window.setTimeout(() => {
+      actions
+        .searchMessages(query)
+        .then((messages) => {
+          if (cancelled) return;
+          setSearchResults(messages);
+          setSearching(false);
+        })
+        .catch((error) => {
+          if (cancelled) return;
+          setSearchResults([]);
+          setSearching(false);
+          actions.notify(error instanceof Error ? error.message : 'Search failed');
+        });
+    }, 250);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [searchOpen, searchQuery, state.room.id]);
 
   useEffect(() => {
     stickToBottom.current = true;
@@ -112,18 +210,123 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
     }
   }, [text]);
 
+  function startTyping() {
+    if (readOnly || typingActive.current) return;
+    typingActive.current = true;
+    actions.setTyping(true);
+    typingHeartbeat.current = setInterval(() => actions.setTyping(true), 2500);
+  }
+
+  function stopTyping() {
+    if (!typingActive.current) return;
+    typingActive.current = false;
+    if (typingHeartbeat.current) {
+      clearInterval(typingHeartbeat.current);
+      typingHeartbeat.current = null;
+    }
+    actions.setTyping(false);
+  }
+
   function updateText(next: string) {
     setText(next);
     drafts.set(state.room.id, next);
+    if (next.trim()) startTyping();
+    else stopTyping();
   }
 
   function send() {
     const content = text.trim();
     if (!content || readOnly) return;
+    stopTyping();
     actions.sendMessage(content, kind);
     drafts.delete(state.room.id);
     setText('');
     inputRef.current?.focus();
+  }
+
+  function toggleSearch() {
+    stopTyping();
+    setSearchOpen((open) => {
+      if (open) {
+        setSearchQuery('');
+        setSearchResults(null);
+        setSearching(false);
+      }
+      return !open;
+    });
+  }
+
+  async function openSearchResult(message: Message) {
+    setSearchOpen(false);
+    setSearchQuery('');
+    setSearchResults(null);
+    stickToBottom.current = false;
+    setHighlightId(message.id);
+    try {
+      await actions.jumpToMessage(message);
+    } catch (error) {
+      setHighlightId(null);
+      actions.notify(error instanceof Error ? error.message : 'Could not open that message');
+      return;
+    }
+    window.setTimeout(() => {
+      const target = listRef.current?.querySelector(`[data-message-id="${message.id}"]`);
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }, 60);
+    window.setTimeout(() => {
+      setHighlightId((current) => (current === message.id ? null : current));
+    }, 2800);
+  }
+
+  async function toggleAlerts() {
+    if (!notificationsSupported()) {
+      actions.notify('This browser does not support desktop alerts');
+      return;
+    }
+    if (alertsOn) {
+      setDesktopAlerts(false);
+      setAlertsOn(false);
+      actions.notify('Desktop alerts off');
+      return;
+    }
+    let permission = Notification.permission;
+    if (permission === 'default') permission = await Notification.requestPermission();
+    if (permission !== 'granted') {
+      actions.notify('Desktop notifications are blocked for this site');
+      return;
+    }
+    setDesktopAlerts(true);
+    setAlertsOn(true);
+    actions.notify('Desktop alerts on — mentions notify you while this tab is hidden');
+  }
+
+  function startEdit(message: Message) {
+    stopTyping();
+    setEditingId(message.id);
+    setEditText(message.content);
+  }
+
+  function cancelEdit() {
+    setEditingId(null);
+    setEditText('');
+  }
+
+  async function saveEdit(message: Message) {
+    const content = editText.trim();
+    if (!content || content === message.content) {
+      cancelEdit();
+      return;
+    }
+    setSavingEdit(true);
+    try {
+      await actions.editMessage(message.id, content);
+      setEditingId(null);
+      setEditText('');
+    } catch (error) {
+      actions.notify(error instanceof Error ? error.message : 'Could not edit the message');
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   function handleScroll() {
@@ -166,10 +369,96 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
           <ChatIcon size={14} />
           Chat
         </span>
-        <span className="chat-head-meta">
-          {state.messages.length === 0 ? 'No messages yet' : `${state.messages.length} messages`}
-        </span>
+        <div className="chat-head-actions">
+          <span className="chat-head-meta">
+            {state.messages.length === 0 ? 'No messages yet' : `${state.messages.length} messages`}
+          </span>
+          <button
+            type="button"
+            className={`icon-btn ${searchOpen ? 'active' : ''}`}
+            aria-label="Search this room"
+            aria-pressed={searchOpen}
+            title="Search messages"
+            onClick={toggleSearch}
+          >
+            <SearchIcon size={14} />
+          </button>
+          <button
+            type="button"
+            className={`icon-btn ${alertsOn ? 'active' : ''}`}
+            aria-label="Desktop mention alerts"
+            aria-pressed={alertsOn}
+            title={
+              alertsOn
+                ? 'Desktop alerts are on for mentions while this tab is hidden'
+                : 'Enable desktop alerts for mentions'
+            }
+            onClick={toggleAlerts}
+          >
+            {alertsOn ? <BellIcon size={14} /> : <BellOffIcon size={14} />}
+          </button>
+        </div>
       </div>
+
+      {searchOpen ? (
+        <div className="chat-search" role="search">
+          <div className="chat-search-bar">
+            <SearchIcon size={14} />
+            <input
+              ref={searchInputRef}
+              className="chat-search-input"
+              value={searchQuery}
+              maxLength={100}
+              placeholder="Search this room…"
+              aria-label="Search messages in this room"
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  toggleSearch();
+                }
+              }}
+            />
+            {searching ? <span className="chat-search-status">Searching…</span> : null}
+            <button
+              type="button"
+              className="icon-btn"
+              aria-label="Close search"
+              onClick={toggleSearch}
+            >
+              <XIcon size={13} />
+            </button>
+          </div>
+          <div className="chat-search-results">
+            {searchQuery.trim().length < 2 ? (
+              <p className="chat-search-hint">Type at least 2 characters to search this room.</p>
+            ) : searchResults === null || searching ? (
+              <p className="chat-search-hint">Looking through the history…</p>
+            ) : searchResults.length === 0 ? (
+              <p className="chat-search-hint">No messages match “{searchQuery.trim()}”.</p>
+            ) : (
+              searchResults.map((result) => (
+                <button
+                  type="button"
+                  className="chat-search-result"
+                  key={result.id}
+                  onClick={() => openSearchResult(result)}
+                >
+                  <span className="chat-search-result-head">
+                    <strong>{result.senderName}</strong>
+                    <span>
+                      {dayLabel(result.createdAt)} · {clockTime(result.createdAt)}
+                    </span>
+                  </span>
+                  <span className="chat-search-result-text">
+                    {highlightQuery(result.content, searchQuery.trim())}
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </div>
+      ) : null}
 
       <div className="messages" ref={listRef} onScroll={handleScroll}>
         {state.messages.length === 0 ? (
@@ -208,6 +497,7 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
             previous.senderId === message.senderId &&
             new Date(message.createdAt).getTime() - new Date(previous.createdAt).getTime() < 5 * 60 * 1000;
           const isAgent = message.senderType === 'agent';
+          const senderAvatar = membersByPrincipal.get(`${message.senderType}:${message.senderId}`)?.avatar;
           const mentionsMe =
             message.senderType !== 'system' &&
             message.mentions.some((mention) => mention.type === state.me.type && mention.id === state.me.id);
@@ -215,18 +505,25 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
             message.senderType !== 'system' &&
             (state.me.role === 'admin' ||
               (message.senderType === state.me.type && message.senderId === state.me.id));
+          const canEdit =
+            !readOnly &&
+            message.senderType === state.me.type &&
+            message.senderId === state.me.id;
 
           return (
             <div key={message.id}>
               {newDay ? <div className="day-divider"><span>{dayLabel(message.createdAt)}</span></div> : null}
               <article
-                className={`msg ${isAgent ? 'agent' : ''} kind-${message.kind} ${sameSender ? 'grouped' : ''} ${mentionsMe ? 'mentions-me' : ''}`}
+                className={`msg ${isAgent ? 'agent' : ''} kind-${message.kind} ${sameSender ? 'grouped' : ''} ${mentionsMe ? 'mentions-me' : ''} ${highlightId === message.id ? 'flash' : ''}`}
+                data-message-id={message.id}
               >
                 <div className="msg-avatar-wrap">
                   {!sameSender ? (
-                    <span className={`avatar ${isAgent ? 'avatar-agent' : ''}`}>
-                      {isAgent ? <BotIcon size={15} /> : initial(message.senderName)}
-                    </span>
+                    <Avatar
+                      name={message.senderName}
+                      type={isAgent ? 'agent' : 'user'}
+                      avatar={senderAvatar}
+                    />
                   ) : null}
                 </div>
                 <div className="msg-body">
@@ -244,17 +541,86 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
                       <span className="msg-time">{clockTime(message.createdAt)}</span>
                     </div>
                   ) : null}
-                  <p className="msg-text">{highlightMentions(message.content, state.me.name)}</p>
-                  {canDelete ? (
-                    <button
-                      type="button"
-                      className="msg-delete"
-                      title="Delete message"
-                      aria-label={`Delete message from ${message.senderName}`}
-                      onClick={() => removeMessage(message)}
-                    >
-                      <TrashIcon size={12} />
-                    </button>
+                  {editingId === message.id ? (
+                    <div className="msg-edit">
+                      <textarea
+                        className="msg-edit-input"
+                        value={editText}
+                        rows={Math.min(6, Math.max(2, editText.split('\n').length))}
+                        autoFocus
+                        maxLength={4000}
+                        aria-label="Edit message"
+                        onChange={(event) => setEditText(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            cancelEdit();
+                          }
+                          if (
+                            event.key === 'Enter' &&
+                            !event.shiftKey &&
+                            !event.nativeEvent.isComposing
+                          ) {
+                            event.preventDefault();
+                            void saveEdit(message);
+                          }
+                        }}
+                      />
+                      <div className="msg-edit-actions">
+                        <span className="msg-edit-hint">Enter to save · Esc to cancel</span>
+                        <button type="button" className="btn btn-quiet btn-tiny" onClick={cancelEdit}>
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-tiny"
+                          disabled={
+                            savingEdit || !editText.trim() || editText.trim() === message.content
+                          }
+                          onClick={() => void saveEdit(message)}
+                        >
+                          {savingEdit ? 'Saving…' : 'Save'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="msg-text">
+                      {highlightMentions(message.content, state.me.name)}
+                      {message.editedAt ? (
+                        <span
+                          className="msg-edited"
+                          title={`Edited ${new Date(message.editedAt).toLocaleString()}`}
+                        >
+                          {' '}(edited)
+                        </span>
+                      ) : null}
+                    </p>
+                  )}
+                  {editingId !== message.id && (canEdit || canDelete) ? (
+                    <div className="msg-actions">
+                      {canEdit ? (
+                        <button
+                          type="button"
+                          className="msg-action"
+                          title="Edit message"
+                          aria-label={`Edit message from ${message.senderName}`}
+                          onClick={() => startEdit(message)}
+                        >
+                          <PencilIcon size={12} />
+                        </button>
+                      ) : null}
+                      {canDelete ? (
+                        <button
+                          type="button"
+                          className="msg-action danger"
+                          title="Delete message"
+                          aria-label={`Delete message from ${message.senderName}`}
+                          onClick={() => removeMessage(message)}
+                        >
+                          <TrashIcon size={12} />
+                        </button>
+                      ) : null}
+                    </div>
                   ) : null}
                 </div>
               </article>
@@ -264,6 +630,20 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
       </div>
 
       <div className="composer">
+        {!readOnly ? (
+          <div className={`typing-line ${typers.length > 0 ? 'visible' : ''}`} aria-live="polite">
+            {typers.length > 0 ? (
+              <>
+                <span className="typing-dots" aria-hidden="true">
+                  <i />
+                  <i />
+                  <i />
+                </span>
+                <span>{typingLabel(typers.map((entry) => entry.name))}</span>
+              </>
+            ) : null}
+          </div>
+        ) : null}
         {readOnly ? (
           <div className="readonly-banner">You are a viewer in this room. Chat, tasks, and presence updates are read-only.</div>
         ) : (
@@ -278,6 +658,7 @@ export function ChatPanel({ state, actions }: ChatPanelProps) {
               enterKeyHint="send"
               value={text}
               onChange={(event) => updateText(event.target.value)}
+              onBlur={stopTyping}
               onKeyDown={(event) => {
                 if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing) {
                   event.preventDefault();

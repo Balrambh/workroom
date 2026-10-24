@@ -12,6 +12,7 @@ import type {
 } from '../lib/types';
 import { initial, presenceMeta, roleMeta } from '../lib/format';
 import { profilePath } from '../lib/profile';
+import { Avatar } from './Avatar';
 import { Modal } from './Modal';
 import { ProfileDialog } from './ProfileDialog';
 import {
@@ -318,9 +319,7 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
             <div className="member-block" key={`${member.type}-${member.id}`}>
               <div className="member-row">
                 <span className="member-avatar-wrap">
-                  <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
-                    {member.type === 'agent' ? <BotIcon size={15} /> : initial(member.name)}
-                  </span>
+                  <Avatar name={member.name} type={member.type} avatar={member.avatar} />
                   <span
                     className={`member-presence ${meta?.tone ?? 'gray'}`}
                     title={meta?.label ?? 'Offline'}
@@ -377,6 +376,20 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                   <span className={`tag tag-${roleMeta[member.role].tone}`}>{roleMeta[member.role].label}</span>
                 )}
               </div>
+
+              {isMe && member.type === 'user' ? (
+                <div className="agent-wake member-self-edit">
+                  <div className="agent-wake-actions">
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-tiny"
+                      onClick={() => actions.openMyProfile()}
+                    >
+                      <PencilIcon size={12} /> Edit profile &amp; photo
+                    </button>
+                  </div>
+                </div>
+              ) : null}
 
               {isAdmin && member.type === 'agent' ? (
                 <div className="agent-wake">
@@ -482,7 +495,12 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
             <>
               <div className="agent-created">
                 <div className="agent-created-head">
-                  <span className="avatar avatar-agent"><BotIcon size={16} /></span>
+                  <Avatar
+                    name={created.agent.name}
+                    type="agent"
+                    avatar={created.agent.avatar}
+                    iconSize={16}
+                  />
                   <div>
                     <strong>{created.agent.name}</strong>
                     <span>joined as {created.agent.role}</span>

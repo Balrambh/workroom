@@ -27,6 +27,7 @@ export interface SessionUser {
   name: string;
   email: string;
   handle?: string;
+  avatar?: string;
 }
 
 export interface Session {
@@ -56,6 +57,7 @@ export interface Member {
   description: string | null;
   handle: string | null;
   headline: string | null;
+  avatar: string | null;
 }
 
 export interface ProfileRoom {
@@ -71,12 +73,14 @@ export interface ProfileAgentLink {
   handle: string;
   name: string;
   headline: string;
+  avatar: string | null;
 }
 
 export interface ProfileOwner {
   type: PrincipalType;
   handle: string;
   name: string;
+  avatar: string | null;
 }
 
 export interface UserProfile {
@@ -88,6 +92,7 @@ export interface UserProfile {
   bio: string;
   location: string;
   website: string;
+  avatar: string | null;
   joinedAt: string;
   rooms: ProfileRoom[];
   agents: ProfileAgentLink[];
@@ -104,6 +109,7 @@ export interface AgentProfile {
   headline: string;
   bio: string;
   website: string;
+  avatar: string | null;
   capabilities: string[];
   createdAt: string;
   role: Role;
@@ -121,6 +127,7 @@ export interface UserProfilePatch {
   bio?: string;
   location?: string;
   website?: string;
+  avatar?: string;
   showRooms?: boolean;
 }
 
@@ -130,6 +137,7 @@ export interface AgentProfilePatch {
   headline?: string;
   bio?: string;
   website?: string;
+  avatar?: string;
   capabilities?: string[];
 }
 
@@ -164,9 +172,17 @@ export interface Message {
   kind: MessageKind;
   content: string;
   createdAt: string;
+  editedAt: string | null;
   seq: number;
   mentions: Mention[];
   clientMessageId: string | null;
+}
+
+export interface TypingEntry {
+  type: PrincipalType;
+  id: string;
+  name: string;
+  expiresAt: number;
 }
 
 export interface Task {
@@ -231,6 +247,7 @@ export interface VoiceParticipant {
   id: string;
   name: string;
   role: Role;
+  avatar?: string;
   muted: boolean;
   deafened: boolean;
   joinedAt: string;
@@ -238,7 +255,7 @@ export interface VoiceParticipant {
 
 export interface RoomState {
   room: Room;
-  me: { type: PrincipalType; id: string; name: string; role: Role };
+  me: { type: PrincipalType; id: string; name: string; role: Role; avatar?: string };
   members: Member[];
   repos: Repo[];
   tasks: Task[];
@@ -246,6 +263,7 @@ export interface RoomState {
   messages: Message[];
   presence: PresenceEntry[];
   voice: VoiceParticipant[];
+  typing?: TypingEntry[];
   joinRequests?: JoinRequest[];
   unreadCount?: number;
 }
@@ -266,6 +284,7 @@ export interface PublicMember {
   role: Role;
   description: string | null;
   handle: string | null;
+  avatar: string | null;
 }
 
 export interface RoomPreview {
@@ -348,6 +367,10 @@ export interface RoomActions {
   deleteRoom(): Promise<void>;
   leaveRoom(): Promise<void>;
   deleteMessage(messageId: string): Promise<void>;
+  editMessage(messageId: string, content: string): Promise<void>;
+  searchMessages(query: string): Promise<Message[]>;
+  jumpToMessage(message: Message): Promise<void>;
+  setTyping(typing: boolean): void;
   loadOlder(beforeSeq: number): Promise<Message[]>;
   markRead(): void;
   setRole(member: Member, role: Role): Promise<void>;
@@ -355,6 +378,7 @@ export interface RoomActions {
   approveJoinRequest(requestId: string): Promise<void>;
   denyJoinRequest(requestId: string): Promise<void>;
   refreshRoom(): Promise<void>;
+  openMyProfile(): void;
   copy(text: string, label: string): void;
   notify(message: string): void;
 }

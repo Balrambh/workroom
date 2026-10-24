@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomState, VoiceParticipant } from '../lib/types';
 import type { VoiceController } from '../lib/useRoomVoice';
+import { avatarSrc } from '../lib/avatars';
 import { initial } from '../lib/format';
 import {
   HeadphonesIcon,
@@ -74,6 +75,7 @@ function StagePerson({
   speaking: boolean;
 }) {
   const silenced = participant.muted || participant.deafened;
+  const avatar = avatarSrc(participant.avatar);
   return (
     <div
       className={`stage-person ${speaking ? 'speaking' : ''} ${isSelf ? 'self' : ''}`}
@@ -81,7 +83,9 @@ function StagePerson({
       title={`${participant.name}${isSelf ? ' (you)' : ''}${participant.deafened ? ' · deafened' : participant.muted ? ' · muted' : ''}`}
     >
       <span className="stage-avatar-wrap">
-        <span className="stage-avatar">{initial(participant.name)}</span>
+        <span className={`stage-avatar ${avatar ? 'has-image' : ''}`}>
+          {avatar ? <img src={avatar} alt="" /> : initial(participant.name)}
+        </span>
         {silenced ? (
           <span className="stage-mute-badge" aria-hidden="true">
             {participant.deafened ? <HeadphonesOffIcon size={10} /> : <MicOffIcon size={10} />}
@@ -115,6 +119,7 @@ export function VoiceStage({ voice, participants, me, connected }: VoiceStagePro
             id: me.id,
             name: me.name,
             role: me.role,
+            ...(me.avatar ? { avatar: me.avatar } : {}),
             muted: voice.muted,
             deafened: voice.deafened,
             joinedAt: '0000',

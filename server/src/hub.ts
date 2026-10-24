@@ -15,6 +15,7 @@ import type {
   PrincipalType,
   Role,
   RoomState,
+  TypingEntry,
   VoiceParticipant,
 } from './types.js';
 
@@ -51,6 +52,11 @@ const voiceRooms = new Map<string, Map<string, VoiceSession>>();
 const agentSockets = new Map<string, WebSocket>();
 const agentMessageTimes = new Map<string, number[]>();
 const pausedRooms = new Set<string>();
+const typingRooms = new Map<
+  string,
+  Map<string, { entry: TypingEntry; timer: ReturnType<typeof setTimeout> }>
+>();
+const TYPING_TTL_MS = 4_500;
 
 const PRESENCE_STATUSES = new Set<PresenceStatus>(['online', 'working', 'reviewing', 'away', 'offline']);
 const MESSAGE_KINDS = new Set<MessageKind>(['chat', 'instruction', 'suggestion']);
@@ -178,6 +184,74 @@ export function broadcastPresence(roomId: string): void {
   broadcast(roomId, { type: 'presence.update', presence: presenceList(roomId) });
 }
 
+/* Typing state is deliberately ephemeral and per-socket: an entry expires on
+ * its own after a few seconds so a dropped tab never leaves a phantom typer. */
+function typingList(roomId: string): TypingEntry[] {
+  const room = typingRooms.get(roomId);
+  if (!room) return [];
+  const now = Date.now();
+  return [...room.values()]
+    .filter((session) => session.entry.expiresAt > now)
+    .map((session) => session.entry)
+    .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function broadcastTyping(roomId: string): void {
+  broadcast(roomId, { type: 'typing.update', typing: typingList(roomId) });
+}
+
+export function setTyping(roomId: string, principal: Principal, active: boolean): void {
+  const key = principalKey(principal.type, principal.id);
+  const existing = typingRooms.get(roomId)?.get(key);
+  if (existing) {
+    clearTimeout(existing.timer);
+    const room = typingRooms.get(roomId);
+    room?.delete(key);
+    if (room && room.size === 0) typingRooms.delete(roomId);
+  }
+  if (!active) {
+    if (existing) broadcastTyping(roomId);
+    return;
+  }
+
+  let room = typingRooms.get(roomId);
+  if (!room) {
+    room = new Map();
+    typingRooms.set(roomId, room);
+  }
+  const timer = setTimeout(() => {
+    const current = typingRooms.get(roomId);
+    const session = current?.get(key);
+    if (!current || !session || session.timer !== timer) return;
+    current.delete(key);
+    if (current.size === 0) typingRooms.delete(roomId);
+    broadcastTyping(roomId);
+  }, TYPING_TTL_MS);
+  timer.unref();
+  room.set(key, {
+    entry: { type: principal.type, id: principal.id, name: principal.name, expiresAt: Date.now() + TYPING_TTL_MS },
+    timer,
+  });
+  if (!existing) broadcastTyping(roomId);
+}
+
+export function clearTyping(roomId: string, principal: Principal): void {
+  const room = typingRooms.get(roomId);
+  const session = room?.get(principalKey(principal.type, principal.id));
+  if (!room || !session) return;
+  clearTimeout(session.timer);
+  room.delete(principalKey(principal.type, principal.id));
+  if (room.size === 0) typingRooms.delete(roomId);
+  broadcastTyping(roomId);
+}
+
+function clearRoomTyping(roomId: string): void {
+  const room = typingRooms.get(roomId);
+  if (!room) return;
+  for (const session of room.values()) clearTimeout(session.timer);
+  typingRooms.delete(roomId);
+}
+
 export function broadcastMembers(roomId: string): void {
   broadcast(roomId, { type: 'members.updated', members: store.listMembers(roomId) });
   broadcastPresence(roomId);
@@ -190,6 +264,7 @@ export function syncPrincipalProfile(
   id: string,
   name: string,
   handle: string | null,
+  avatar?: string | null,
 ): void {
   for (const client of clients.values()) {
     if (client.principal.type !== type || client.principal.id !== id) continue;
@@ -197,13 +272,18 @@ export function syncPrincipalProfile(
       ...client.principal,
       name,
       ...(handle ? { handle } : { handle: undefined }),
+      ...(avatar ? { avatar } : {}),
     };
   }
   const changedRooms = new Set<string>();
   for (const [roomId, room] of voiceRooms) {
     for (const session of room.values()) {
       if (session.participant.type !== type || session.participant.id !== id) continue;
-      session.participant = { ...session.participant, name };
+      session.participant = {
+        ...session.participant,
+        name,
+        ...(avatar ? { avatar } : {}),
+      };
       changedRooms.add(roomId);
     }
   }
@@ -243,6 +323,7 @@ export function broadcastRoomDeleted(roomId: string): void {
   }
   presence.delete(roomId);
   pausedRooms.delete(roomId);
+  clearRoomTyping(roomId);
   for (const client of clients.values()) {
     if (client.ws.readyState !== WebSocket.OPEN) continue;
     const member =
@@ -350,7 +431,13 @@ export function buildRoomState(roomId: string, principal: Principal): RoomState 
 
   return {
     room,
-    me: { type: principal.type, id: principal.id, name: principal.name, role: membership.role },
+    me: {
+      type: principal.type,
+      id: principal.id,
+      name: principal.name,
+      role: membership.role,
+      ...(principal.avatar ? { avatar: principal.avatar } : {}),
+    },
     members: store.listMembers(roomId),
     repos: store.listRepos(roomId),
     tasks: store.listTasks(roomId),
@@ -358,6 +445,7 @@ export function buildRoomState(roomId: string, principal: Principal): RoomState 
     messages: store.listMessages(roomId, undefined, 80),
     presence: presenceList(roomId),
     voice: voiceParticipants(roomId),
+    typing: typingList(roomId),
     ...(membership.role === 'admin'
       ? { joinRequests: store.listPendingJoinRequests(roomId) }
       : {}),
@@ -401,6 +489,7 @@ export function evictFromRoom(
   message = 'You were removed from the room.',
 ): void {
   presence.get(roomId)?.delete(principalKey(type, id));
+  clearTyping(roomId, { type: type as PrincipalType, id, name: '' });
   removeVoiceForPrincipal(roomId, type, id);
   for (const client of clients.values()) {
     if (client.rooms.has(roomId) && client.principal.type === type && client.principal.id === id) {
@@ -517,6 +606,7 @@ export function createRoomMessage(input: CreateRoomMessageInput): { message: Mes
   );
 
   if (input.principal.type === 'user') pausedRooms.delete(input.roomId);
+  clearTyping(input.roomId, input.principal);
   broadcast(input.roomId, { type: 'message.new', message });
   broadcastUnread(input.roomId);
 
@@ -536,6 +626,32 @@ export function createRoomMessage(input: CreateRoomMessageInput): { message: Mes
   return { message, duplicate: false };
 }
 
+export interface EditRoomMessageInput {
+  roomId: string;
+  principal: Principal;
+  messageId: string;
+  content: string;
+}
+
+export function editRoomMessage(input: EditRoomMessageInput): Message {
+  const existing = store.getMessageById(input.messageId);
+  if (!existing || existing.roomId !== input.roomId) throw new HttpError(404, 'Message not found');
+  if (existing.senderType !== input.principal.type || existing.senderId !== input.principal.id) {
+    throw new HttpError(403, 'Only the author can edit a message');
+  }
+  const content = input.content.trim();
+  if (!content) throw new HttpError(400, 'Message cannot be empty');
+  if (content.length > 4000) throw new HttpError(400, 'Messages are limited to 4000 characters');
+
+  const mentions = collectMentions(input.roomId, content, []);
+  const message = store.updateMessage(input.roomId, existing.id, content, mentions);
+  if (!message) throw new HttpError(404, 'Message not found');
+  broadcast(input.roomId, { type: 'message.updated', message });
+  broadcastUnread(input.roomId);
+  routeMentions(input.roomId, message);
+  return message;
+}
+
 function handleJoin(client: Client, roomId: string): void {
   const membership = store.getMembership(roomId, client.principal);
   if (!membership) {
@@ -552,6 +668,7 @@ function handleJoin(client: Client, roomId: string): void {
 function handleLeave(client: Client, roomId: string): void {
   if (!client.rooms.has(roomId)) return;
   client.rooms.delete(roomId);
+  clearTyping(roomId, client.principal);
   removeVoiceForSocket(client.ws, roomId);
   markOfflineIfGone(roomId, client.principal);
 }
@@ -639,6 +756,13 @@ function handlePresenceSet(client: Client, payload: Record<string, unknown>): vo
   }
 }
 
+function handleTypingSet(client: Client, payload: Record<string, unknown>): void {
+  const roomId = roomIdFor(client, payload);
+  const membership = store.getMembership(roomId, client.principal);
+  if (!membership || membership.role === 'viewer') return;
+  setTyping(roomId, client.principal, payload.typing === true);
+}
+
 /* ------------------------------ voice mesh ------------------------------- */
 
 const PEER_ID_PATTERN = /^[A-Za-z0-9_-]{6,80}$/;
@@ -695,6 +819,7 @@ function handleVoiceJoin(client: Client, payload: Record<string, unknown>): void
       id: client.principal.id,
       name: client.principal.name,
       role: membership.role,
+      ...(client.principal.avatar ? { avatar: client.principal.avatar } : {}),
       muted: payload.muted === true,
       deafened: payload.deafened === true,
       joinedAt: nowIso(),
@@ -778,6 +903,9 @@ function handleClientMessage(client: Client, raw: RawData): void {
       break;
     case 'presence.set':
       handlePresenceSet(client, payload);
+      break;
+    case 'typing.set':
+      handleTypingSet(client, payload);
       break;
     case 'voice.join':
       handleVoiceJoin(client, payload);
@@ -955,6 +1083,7 @@ export function attachHub(server: HttpServer): () => void {
         store.markAgentSocket(client.principal.id);
       }
       for (const roomId of client.rooms) {
+        clearTyping(roomId, client.principal);
         markOfflineIfGone(roomId, client.principal);
       }
     });

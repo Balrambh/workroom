@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomActions, RoomState } from '../lib/types';
 import { useRoomVoice } from '../lib/useRoomVoice';
-import { initial, presenceMeta } from '../lib/format';
+import { presenceMeta } from '../lib/format';
+import { Avatar } from './Avatar';
 import { ChatPanel } from './ChatPanel';
 import { RightPanel } from './RightPanel';
 import type { PanelTab } from './RightPanel';
 import { RoomSettingsDialog } from './RoomSettingsDialog';
 import { VoiceStage } from './VoiceStage';
 import {
-  BotIcon,
   BranchIcon,
   CopyIcon,
   HashIcon,
@@ -128,7 +128,13 @@ export function RoomView({
                   className={`room-person ${member.type === 'agent' ? 'agent' : ''}`}
                   key={`${member.type}-${member.id}`}
                 >
-                  {member.type === 'agent' ? <BotIcon size={12} /> : initial(member.name)}
+                  <Avatar
+                    name={member.name}
+                    type={member.type}
+                    avatar={member.avatar}
+                    iconSize={12}
+                    className="room-person-avatar"
+                  />
                   <span className={`room-person-dot ${tone}`} aria-hidden="true" />
                 </span>
               );

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { FormEvent } from 'react';
 import type { PrincipalType, RoomActions, RoomState, Task, TaskStatus } from '../lib/types';
 import { parsePaths, taskMeta, timeAgo } from '../lib/format';
-import { BranchIcon, PlusIcon, XIcon } from './Icons';
+import { BranchIcon, PlusIcon, SearchIcon, XIcon } from './Icons';
 
 interface TasksPanelProps {
   state: RoomState;
@@ -10,6 +10,16 @@ interface TasksPanelProps {
 }
 
 const GROUP_ORDER: TaskStatus[] = ['doing', 'review', 'todo', 'done'];
+
+type TaskFilter = 'all' | 'open' | 'mine' | 'unassigned' | 'done';
+
+const FILTERS: { value: TaskFilter; label: string }[] = [
+  { value: 'all', label: 'All' },
+  { value: 'open', label: 'Open' },
+  { value: 'mine', label: 'Mine' },
+  { value: 'unassigned', label: 'Unassigned' },
+  { value: 'done', label: 'Done' },
+];
 
 function splitPrincipal(value: string): { type: PrincipalType | null; id: string | null } {
   if (!value) return { type: null, id: null };
@@ -30,6 +40,28 @@ export function TasksPanel({ state, actions }: TasksPanelProps) {
   const [assignee, setAssignee] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [query, setQuery] = useState('');
+  const [filter, setFilter] = useState<TaskFilter>('all');
+
+  const needle = query.trim().toLowerCase();
+  const visibleTasks = state.tasks.filter((task) => {
+    if (filter === 'open' && task.status === 'done') return false;
+    if (filter === 'done' && task.status !== 'done') return false;
+    if (filter === 'mine' && !(task.assigneeType === me.type && task.assigneeId === me.id)) {
+      return false;
+    }
+    if (filter === 'unassigned' && task.assigneeId) return false;
+    if (!needle) return true;
+    return [
+      task.title,
+      task.description,
+      task.paths,
+      task.branch,
+      task.repoName ?? '',
+      task.assigneeName ?? '',
+      task.createdByName,
+    ].some((value) => value.toLowerCase().includes(needle));
+  });
 
   const doingTasks = state.tasks.filter((task) => task.status === 'doing');
   const pathOwners = new Map<string, Set<string>>();
@@ -114,6 +146,44 @@ export function TasksPanel({ state, actions }: TasksPanelProps) {
         </div>
       </div>
 
+      {state.tasks.length > 0 ? (
+        <div className="task-toolbar">
+          <div className="task-search">
+            <SearchIcon size={13} />
+            <input
+              className="task-search-input"
+              value={query}
+              placeholder="Search tasks…"
+              aria-label="Search tasks"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {query ? (
+              <button
+                type="button"
+                className="icon-btn"
+                aria-label="Clear search"
+                onClick={() => setQuery('')}
+              >
+                <XIcon size={11} />
+              </button>
+            ) : null}
+          </div>
+          <div className="filter-chips" role="group" aria-label="Filter tasks">
+            {FILTERS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={`filter-chip ${filter === option.value ? 'active' : ''}`}
+                aria-pressed={filter === option.value}
+                onClick={() => setFilter(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
       {error ? <p className="form-error">{error}</p> : null}
 
       {showForm ? (
@@ -194,9 +264,23 @@ export function TasksPanel({ state, actions }: TasksPanelProps) {
         <p className="panel-empty">
           No tasks yet. Create one and assign it to a person or an agent — the room sees status changes live.
         </p>
+      ) : visibleTasks.length === 0 ? (
+        <p className="panel-empty">
+          No tasks match {needle ? `“${query.trim()}”` : 'this filter'}.{' '}
+          <button
+            type="button"
+            className="link-btn"
+            onClick={() => {
+              setQuery('');
+              setFilter('all');
+            }}
+          >
+            Clear filters
+          </button>
+        </p>
       ) : (
         GROUP_ORDER.map((status) => {
-          const tasks = state.tasks.filter((task) => task.status === status);
+          const tasks = visibleTasks.filter((task) => task.status === status);
           if (tasks.length === 0) return null;
           const meta = taskMeta[status];
           return (

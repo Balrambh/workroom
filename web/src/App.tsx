@@ -31,6 +31,7 @@ import { RoomView } from './components/RoomView';
 import { Modal } from './components/Modal';
 import { ProfileDialog } from './components/ProfileDialog';
 import { BranchIcon, GlobeIcon, HashIcon, MenuIcon, PlusIcon } from './components/Icons';
+import { showMentionNotification } from './lib/notifications';
 
 function roomTarget(): string | null {
   const pathMatch = window.location.pathname.match(/^\/rooms?\/([A-Za-z0-9]+)/i);
@@ -106,7 +107,11 @@ export default function App({ initialCode }: AppProps = {}) {
       .me()
       .then(({ principal }) => {
         if (cancelled || !session || principal.type !== 'user') return;
-        if (principal.name === session.user.name && principal.handle === session.user.handle) {
+        if (
+          principal.name === session.user.name &&
+          principal.handle === session.user.handle &&
+          principal.avatar === session.user.avatar
+        ) {
           return;
         }
         const next: Session = {
@@ -116,6 +121,7 @@ export default function App({ initialCode }: AppProps = {}) {
             name: principal.name,
             handle: principal.handle,
             email: principal.email ?? session.user.email,
+            ...(principal.avatar ? { avatar: principal.avatar } : {}),
           },
         };
         saveSession(next);
@@ -147,6 +153,16 @@ export default function App({ initialCode }: AppProps = {}) {
     }
   }, [session?.user.id]);
 
+  useEffect(() => {
+    if (!session) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('editProfile') !== '1') return;
+    params.delete('editProfile');
+    const query = params.toString();
+    window.history.replaceState(null, '', `/${query ? `?${query}` : ''}`);
+    setProfileOpen(true);
+  }, [session?.user.id]);
+
   function showNotice(message: string) {
     setNotice(message);
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
@@ -157,7 +173,12 @@ export default function App({ initialCode }: AppProps = {}) {
     if (profile.type === 'user' && session) {
       const next: Session = {
         ...session,
-        user: { ...session.user, name: profile.name, handle: profile.handle },
+        user: {
+          ...session.user,
+          name: profile.name,
+          handle: profile.handle,
+          ...(profile.avatar ? { avatar: profile.avatar } : { avatar: undefined }),
+        },
       };
       saveSession(next);
       setSession(next);
@@ -167,7 +188,13 @@ export default function App({ initialCode }: AppProps = {}) {
       const isMe = prev.me.type === profile.type && prev.me.id === profile.id;
       return {
         ...prev,
-        me: isMe ? { ...prev.me, name: profile.name } : prev.me,
+        me: isMe
+          ? {
+              ...prev.me,
+              name: profile.name,
+              ...(profile.avatar ? { avatar: profile.avatar } : { avatar: undefined }),
+            }
+          : prev.me,
         members: prev.members.map((member) =>
           member.type === profile.type && member.id === profile.id
             ? {
@@ -175,6 +202,7 @@ export default function App({ initialCode }: AppProps = {}) {
                 name: profile.name,
                 handle: profile.handle,
                 headline: profile.headline,
+                avatar: profile.avatar,
                 description:
                   member.type === 'agent' ? profile.headline || null : member.description,
               }
@@ -346,6 +374,22 @@ export default function App({ initialCode }: AppProps = {}) {
 
     const applyEvent = (payload: Record<string, any>) => {
       const active = activeIdRef.current;
+
+      const notifyMention = (message: Message, roomId: string) => {
+        if (document.visibilityState === 'visible' || message.senderType === 'system') return;
+        const userId = session?.user.id;
+        if (!userId) return;
+        if (!message.mentions.some((mention) => mention.type === 'user' && mention.id === userId)) return;
+        showMentionNotification({
+          sender: message.senderName,
+          room: roomsRef.current.find((room) => room.id === roomId)?.name ?? 'room',
+          body: message.content,
+          onClick: () => {
+            if (roomId !== activeIdRef.current) setActiveId(roomId);
+          },
+        });
+      };
+
       switch (payload.type) {
         case 'ready':
           break;
@@ -355,16 +399,33 @@ export default function App({ initialCode }: AppProps = {}) {
             setLoadingRoom(false);
           }
           break;
-        case 'message.new':
+        case 'message.new': {
+          const message = payload.message as Message;
+          notifyMention(message, String(payload.roomId));
           if (payload.roomId !== active) break;
           setRoomState((prev) => {
             if (!prev || prev.room.id !== payload.roomId) return prev;
-            const messages = appendById(prev.messages, payload.message as Message);
+            const messages = appendById(prev.messages, message);
             if (messages === prev.messages) return prev;
             messages.sort((left, right) => left.seq - right.seq);
             return { ...prev, messages };
           });
           break;
+        }
+        case 'message.updated': {
+          const message = payload.message as Message;
+          setRoomState((prev) =>
+            prev && prev.room.id === payload.roomId
+              ? {
+                  ...prev,
+                  messages: prev.messages.map((candidate) =>
+                    candidate.id === message.id ? message : candidate,
+                  ),
+                }
+              : prev,
+          );
+          break;
+        }
         case 'message.deleted':
           setRoomState((prev) =>
             prev && prev.room.id === payload.roomId
@@ -426,6 +487,12 @@ export default function App({ initialCode }: AppProps = {}) {
         case 'presence.update':
           if (payload.roomId !== active) break;
           setRoomState((prev) => (prev ? { ...prev, presence: payload.presence as PresenceEntry[] } : prev));
+          break;
+        case 'typing.update':
+          if (payload.roomId !== active) break;
+          setRoomState((prev) =>
+            prev ? { ...prev, typing: payload.typing as RoomState['typing'] } : prev,
+          );
           break;
         case 'voice.participants':
           if (payload.roomId !== active) break;
@@ -744,6 +811,52 @@ export default function App({ initialCode }: AppProps = {}) {
       );
     },
 
+    async editMessage(messageId: string, content: string) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      const updated = await api.editMessage(roomId, messageId, content);
+      setRoomState((prev) =>
+        prev && prev.room.id === roomId
+          ? {
+              ...prev,
+              messages: prev.messages.map((message) =>
+                message.id === updated.id ? updated : message,
+              ),
+            }
+          : prev,
+      );
+    },
+
+    async searchMessages(query: string) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return [];
+      const { messages } = await api.searchMessages(roomId, query);
+      return messages;
+    },
+
+    async jumpToMessage(message: Message) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      const anchor =
+        roomStateRef.current?.messages.find((candidate) => candidate.id === message.id) ?? message;
+      const { older, newer } = await api.messagesAround(roomId, anchor.seq, 30);
+      const byId = new Map<string, Message>();
+      for (const candidate of [...older, anchor, ...newer]) byId.set(candidate.id, candidate);
+      const messages = [...byId.values()].sort((left, right) => left.seq - right.seq);
+      setRoomState((prev) =>
+        prev && prev.room.id === roomId ? { ...prev, messages } : prev,
+      );
+    },
+
+    setTyping(typing: boolean) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      const socket = socketRef.current;
+      if (socket?.readyState === WebSocket.OPEN) {
+        socket.send(JSON.stringify({ type: 'typing.set', roomId, typing }));
+      }
+    },
+
     async loadOlder(beforeSeq: number) {
       const roomId = activeIdRef.current;
       if (!roomId) return [];
@@ -817,6 +930,10 @@ export default function App({ initialCode }: AppProps = {}) {
 
     copy(text: string, label: string) {
       void copy(text, label);
+    },
+
+    openMyProfile() {
+      setProfileOpen(true);
     },
 
     notify(message: string) {
