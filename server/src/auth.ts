@@ -44,18 +44,30 @@ export function resolveToken(token: string): Principal | null {
 
   if (token.startsWith(AGENT_PREFIX)) {
     const row = db
-      .prepare('SELECT id, name FROM agents WHERE token_hash = ?')
-      .get(hashAgentToken(token)) as { id: string; name: string } | undefined;
-    return row ? { type: 'agent', id: row.id, name: row.name } : null;
+      .prepare('SELECT id, name, handle FROM agents WHERE token_hash = ?')
+      .get(hashAgentToken(token)) as { id: string; name: string; handle: string | null } | undefined;
+    return row
+      ? { type: 'agent', id: row.id, name: row.name, ...(row.handle ? { handle: row.handle } : {}) }
+      : null;
   }
 
   try {
     const payload = jwt.verify(token, SECRET) as { sub?: string };
     if (!payload.sub) return null;
     const user = db
-      .prepare('SELECT id, name, email FROM users WHERE id = ?')
-      .get(payload.sub) as { id: string; name: string; email: string } | undefined;
-    return user ? { type: 'user', id: user.id, name: user.name, email: user.email } : null;
+      .prepare('SELECT id, name, email, handle FROM users WHERE id = ?')
+      .get(payload.sub) as
+      | { id: string; name: string; email: string; handle: string | null }
+      | undefined;
+    return user
+      ? {
+          type: 'user',
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          ...(user.handle ? { handle: user.handle } : {}),
+        }
+      : null;
   } catch {
     return null;
   }

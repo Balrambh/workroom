@@ -15,6 +15,7 @@ import {
 } from './auth.js';
 import type { AuthedRequest } from './auth.js';
 import { HttpError } from './errors.js';
+import { handleValidationError, normalizeHandle } from './handles.js';
 import * as hub from './hub.js';
 import * as store from './store.js';
 import { decryptSecret, encryptSecret, newTriggerSecret, testTrigger, validateTriggerUrl } from './trigger.js';
@@ -137,7 +138,13 @@ function publicMembers(roomId: string) {
     type: member.type,
     role: member.role,
     description: member.description,
+    handle: member.handle,
   }));
+}
+
+function profileHeaders(res: Response): void {
+  res.set('Cache-Control', 'no-store');
+  res.set('Referrer-Policy', 'no-referrer');
 }
 
 /* Shared by the one-link briefing, approval responses, and the live join socket. */
@@ -244,7 +251,10 @@ router.post('/auth/register', (req, res) => {
   const user = store.createUser(body.name, body.email, hashPassword(body.password));
   const token = signSessionToken(user.id);
   setSessionCookie(res, token);
-  res.status(201).json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  res.status(201).json({
+    token,
+    user: { id: user.id, name: user.name, email: user.email, handle: user.handle ?? '' },
+  });
 });
 
 router.post('/auth/login', (req, res) => {
@@ -258,7 +268,10 @@ router.post('/auth/login', (req, res) => {
   }
   const token = signSessionToken(user.id);
   setSessionCookie(res, token);
-  res.json({ token, user: { id: user.id, name: user.name, email: user.email } });
+  res.json({
+    token,
+    user: { id: user.id, name: user.name, email: user.email, handle: user.handle ?? '' },
+  });
 });
 
 router.post('/auth/logout', (_req, res) => {
@@ -471,6 +484,25 @@ router.get('/agent/join/requests/:key', (req, res) => {
   });
 });
 
+/* Public identities. Email addresses and credentials never appear here. */
+router.get('/profiles/users/:handle', (req, res) => {
+  const handle = normalizeHandle(req.params.handle);
+  if (handleValidationError(handle)) throw new HttpError(404, 'No profile matches that handle');
+  const profile = store.getUserProfileByHandle(handle);
+  if (!profile) throw new HttpError(404, 'No profile matches that handle');
+  profileHeaders(res);
+  res.json({ profile });
+});
+
+router.get('/profiles/agents/:handle', (req, res) => {
+  const handle = normalizeHandle(req.params.handle);
+  if (handleValidationError(handle)) throw new HttpError(404, 'No profile matches that handle');
+  const profile = store.getAgentProfileByHandle(handle);
+  if (!profile) throw new HttpError(404, 'No profile matches that handle');
+  profileHeaders(res);
+  res.json({ profile });
+});
+
 router.use(requireAuth);
 
 router.get('/me', (req, res) => {
@@ -493,6 +525,172 @@ router.get('/me', (req, res) => {
     }
   }
   res.json({ principal });
+});
+
+/* -------------------------------- profiles ------------------------------- */
+
+const profileHandleSchema = z
+  .string()
+  .trim()
+  .min(3)
+  .max(30)
+  .transform(normalizeHandle)
+  .refine((value) => handleValidationError(value) === null, {
+    message: 'Use 3–30 lowercase letters, numbers, hyphens, or underscores',
+  });
+
+const profileWebsiteSchema = z
+  .string()
+  .trim()
+  .max(300)
+  .refine((value) => !value || /^https?:\/\/[^\s]+$/i.test(value), {
+    message: 'Use a full URL beginning with https://',
+  });
+
+const userProfilePatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(48).optional(),
+    handle: profileHandleSchema.optional(),
+    headline: z.string().trim().max(100).optional(),
+    bio: z.string().trim().max(600).optional(),
+    location: z.string().trim().max(80).optional(),
+    website: profileWebsiteSchema.optional(),
+    showRooms: z.boolean().optional(),
+  })
+  .strict();
+
+const agentCapabilitiesSchema = z.union([
+  z.array(z.string().trim().min(1).max(48)).max(12),
+  z
+    .string()
+    .trim()
+    .max(300)
+    .transform((value) =>
+      value
+        .split(',')
+        .map((item) => item.trim())
+        .filter(Boolean)
+        .slice(0, 12),
+    ),
+]);
+
+const agentProfilePatchSchema = z
+  .object({
+    name: z.string().trim().min(1).max(40).optional(),
+    handle: profileHandleSchema.optional(),
+    headline: z.string().trim().max(120).optional(),
+    bio: z.string().trim().max(900).optional(),
+    website: profileWebsiteSchema.optional(),
+    capabilities: agentCapabilitiesSchema.optional(),
+  })
+  .strict();
+
+function assertProfileHandle(handle: string, principal: { type: 'user' | 'agent'; id: string }): void {
+  if (store.handleInUse(handle, principal)) {
+    throw new HttpError(409, 'That handle is already taken');
+  }
+}
+
+function syncUserProfileRooms(userId: string): void {
+  for (const roomId of store.listPrincipalRoomIds('user', userId)) {
+    hub.broadcastMembers(roomId);
+  }
+}
+
+router.get('/me/profile', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  const profile =
+    principal.type === 'user'
+      ? store.getUserProfile(principal.id)
+      : store.getAgentProfile(principal.id);
+  if (!profile) throw new HttpError(404, 'Profile not found');
+  res.json({ profile });
+});
+
+router.patch('/me/profile', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  if (principal.type === 'user') {
+    const body = userProfilePatchSchema.parse(req.body);
+    if (body.handle) assertProfileHandle(body.handle, { type: 'user', id: principal.id });
+    const profile = store.updateUserProfile(principal.id, body);
+    if (!profile) throw new HttpError(404, 'Profile not found');
+    hub.syncPrincipalProfile('user', principal.id, profile.name, profile.handle);
+    syncUserProfileRooms(principal.id);
+    res.json({ profile });
+    return;
+  }
+
+  const body = agentProfilePatchSchema.parse(req.body);
+  if (body.handle) assertProfileHandle(body.handle, { type: 'agent', id: principal.id });
+  const capabilities = body.capabilities ? body.capabilities.join(', ') : undefined;
+  const profile = store.updateAgentProfile(principal.id, {
+    name: body.name,
+    handle: body.handle,
+    headline: body.headline,
+    bio: body.bio,
+    website: body.website,
+    ...(capabilities !== undefined ? { capabilities } : {}),
+  });
+  if (!profile) throw new HttpError(404, 'Profile not found');
+  hub.syncPrincipalProfile('agent', principal.id, profile.name, profile.handle);
+  const roomId = store.getAgentRoom(principal.id);
+  if (roomId) hub.broadcastMembers(roomId);
+  res.json({ profile });
+});
+
+router.patch('/me/password', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  userOnly(principal);
+  const body = z
+    .object({
+      currentPassword: z.string().min(1).max(100),
+      newPassword: z.string().min(8).max(100),
+    })
+    .parse(req.body);
+  const passwordHash = store.getUserPasswordHash(principal.id);
+  if (!passwordHash || !verifyPassword(body.currentPassword, passwordHash)) {
+    throw new HttpError(403, 'Current password is incorrect');
+  }
+  if (body.currentPassword === body.newPassword) {
+    throw new HttpError(400, 'Choose a password different from the current one');
+  }
+  store.updateUserPassword(principal.id, hashPassword(body.newPassword));
+  res.json({ ok: true });
+});
+
+function agentAdminRoom(agentId: string, principal: Principal): string {
+  const roomId = store.getAgentRoom(agentId);
+  if (!roomId) throw new HttpError(404, 'Agent not found');
+  adminOrThrow(roomId, principal);
+  return roomId;
+}
+
+router.get('/agents/:agentId/profile', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  agentAdminRoom(req.params.agentId, principal);
+  const profile = store.getAgentProfile(req.params.agentId);
+  if (!profile) throw new HttpError(404, 'Agent not found');
+  res.json({ profile });
+});
+
+router.patch('/agents/:agentId/profile', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  const roomId = agentAdminRoom(req.params.agentId, principal);
+  const body = agentProfilePatchSchema.parse(req.body);
+  if (body.handle) assertProfileHandle(body.handle, { type: 'agent', id: req.params.agentId });
+  const capabilities = body.capabilities ? body.capabilities.join(', ') : undefined;
+  const profile = store.updateAgentProfile(req.params.agentId, {
+    name: body.name,
+    handle: body.handle,
+    headline: body.headline,
+    bio: body.bio,
+    website: body.website,
+    ...(capabilities !== undefined ? { capabilities } : {}),
+  });
+  if (!profile) throw new HttpError(404, 'Agent not found');
+  hub.syncPrincipalProfile('agent', req.params.agentId, profile.name, profile.handle);
+  hub.broadcastMembers(roomId);
+  res.json({ profile });
 });
 
 /* --------------------------- agent wake config --------------------------- */
@@ -562,6 +760,31 @@ router.post('/agent/me/test-trigger', wrap(async (req, res) => {
   const result = await testTrigger(agentId);
   res.json(result);
 }));
+
+router.post('/agents/:agentId/rotate-token', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  const agentId = req.params.agentId;
+  const runtime = store.getAgentRuntime(agentId);
+  if (!runtime) throw new HttpError(404, 'Agent not found');
+  if (principal.type === 'agent') {
+    if (principal.id !== agentId) throw new HttpError(403, 'Agents can only rotate their own key');
+  } else {
+    adminOrThrow(runtime.roomId, principal);
+  }
+
+  const token = newAgentToken();
+  store.rotateAgentToken(agentId, hashAgentToken(token));
+  hub.disconnectAgent(agentId, 'Your connection key was rotated. Reconnect with the new key.');
+  const activity = store.logActivity(
+    runtime.roomId,
+    principal,
+    'agent.token_rotated',
+    `${principal.name} rotated ${runtime.name}'s connection key.`,
+    { agentId },
+  );
+  emitActivity(runtime.roomId, activity);
+  res.json({ agentId, token });
+});
 
 /* --------------------------- human join flow ---------------------------- */
 
@@ -660,9 +883,10 @@ router.post('/rooms', (req, res) => {
       name: z.string().trim().min(1).max(60),
       topic: z.string().trim().max(200).optional().default(''),
       mode: z.enum(['code', 'chat']),
+      visibility: z.enum(['public', 'unlisted']).optional().default('public'),
     })
     .parse(req.body);
-  const room = store.createRoom(body.name, body.topic, body.mode, principal);
+  const room = store.createRoom(body.name, body.topic, body.mode, principal, body.visibility);
   const activity = store.logActivity(
     room.id,
     principal,
@@ -726,6 +950,71 @@ router.get('/rooms/:roomId', (req, res) => {
   res.json(state);
 });
 
+router.patch('/rooms/:roomId', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  adminOrThrow(req.params.roomId, principal);
+  const body = z
+    .object({
+      name: z.string().trim().min(1).max(60).optional(),
+      topic: z.string().trim().max(200).optional(),
+      visibility: z.enum(['public', 'unlisted']).optional(),
+    })
+    .strict()
+    .parse(req.body);
+  const room = store.updateRoom(req.params.roomId, body);
+  if (!room) throw new HttpError(404, 'Room not found');
+  const activity = store.logActivity(
+    room.id,
+    principal,
+    'room.updated',
+    `${principal.name} updated the room settings.`,
+  );
+  hub.broadcastRoomUpdated(room.id);
+  emitActivity(room.id, activity);
+  const summary =
+    store.listRoomsFor(principal).find((candidate) => candidate.id === room.id) ?? room;
+  res.json({ room: summary, activity });
+});
+
+router.delete('/rooms/:roomId', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  adminOrThrow(req.params.roomId, principal);
+  const room = roomOrThrow(req.params.roomId);
+  hub.broadcastRoomDeleted(room.id);
+  store.deleteRoom(room.id);
+  res.json({ ok: true, roomId: room.id });
+});
+
+router.post('/rooms/:roomId/leave', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  userOnly(principal);
+  const membership = membershipOrThrow(req.params.roomId, principal);
+  if (membership.role === 'admin' && store.countRoomAdmins(req.params.roomId) <= 1) {
+    throw new HttpError(
+      409,
+      'You are the only admin of this room. Promote another admin or delete the room instead.',
+    );
+  }
+  store.leaveRoom(req.params.roomId, principal.id);
+  hub.broadcastMembers(req.params.roomId);
+  hub.evictFromRoom(req.params.roomId, 'user', principal.id, 'You left the room.');
+  res.json({ ok: true });
+});
+
+router.post('/rooms/:roomId/read', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  userOnly(principal);
+  membershipOrThrow(req.params.roomId, principal);
+  const body = z.object({ seq: z.coerce.number().int().min(0).optional() }).parse(req.body ?? {});
+  store.markRoomRead(
+    req.params.roomId,
+    principal.id,
+    body.seq ?? store.getRoomLastSeq(req.params.roomId),
+  );
+  hub.broadcastUnread(req.params.roomId);
+  res.json({ unreadCount: store.getUnreadCount(req.params.roomId, principal.id) });
+});
+
 router.get('/rooms/:roomId/messages', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   membershipOrThrow(req.params.roomId, principal);
@@ -733,6 +1022,7 @@ router.get('/rooms/:roomId/messages', (req, res) => {
     .object({
       before: z.string().optional(),
       after_seq: z.coerce.number().int().min(0).optional(),
+      before_seq: z.coerce.number().int().min(0).optional(),
       limit: z.coerce.number().int().min(1).max(100).optional().default(80),
     })
     .parse(req.query);
@@ -740,6 +1030,13 @@ router.get('/rooms/:roomId/messages', (req, res) => {
   if (query.after_seq !== undefined) {
     res.json({
       messages: store.listMessagesAfter(req.params.roomId, query.after_seq, Math.min(query.limit, 100)),
+      lastSeq: store.getRoomLastSeq(req.params.roomId),
+    });
+    return;
+  }
+  if (query.before_seq !== undefined) {
+    res.json({
+      messages: store.listMessagesBeforeSeq(req.params.roomId, query.before_seq, query.limit),
       lastSeq: store.getRoomLastSeq(req.params.roomId),
     });
     return;
@@ -772,6 +1069,26 @@ router.post('/rooms/:roomId/messages', (req, res) => {
     explicitMentions: body.mentions,
   });
   res.status(duplicate ? 200 : 201).json(message);
+});
+
+router.delete('/rooms/:roomId/messages/:messageId', (req, res) => {
+  const principal = principalOf(req as AuthedRequest);
+  const membership = membershipOrThrow(req.params.roomId, principal);
+  const message = store.getMessageById(req.params.messageId);
+  if (!message || message.roomId !== req.params.roomId) throw new HttpError(404, 'Message not found');
+  if (message.senderId !== principal.id && membership.role !== 'admin') {
+    throw new HttpError(403, 'Only the author or a room admin can delete a message');
+  }
+  store.deleteMessage(req.params.roomId, message.id);
+  const activity = store.logActivity(
+    req.params.roomId,
+    principal,
+    'message.deleted',
+    `${principal.name} deleted a message.`,
+  );
+  hub.broadcastMessageDeleted(req.params.roomId, message.id);
+  emitActivity(req.params.roomId, activity);
+  res.json({ ok: true });
 });
 
 router.patch('/rooms/:roomId/presence', (req, res) => {
@@ -826,7 +1143,12 @@ router.post('/rooms/:roomId/agents', wrap(async (req, res) => {
     body.role,
     hashAgentToken(token),
     principal.id,
-    { deliveryMode: body.deliveryMode as DeliveryMode, triggerUrl, triggerSecretEnc },
+    {
+      deliveryMode: body.deliveryMode as DeliveryMode,
+      triggerUrl,
+      triggerSecretEnc,
+      createdByType: principal.type,
+    },
   );
   const activity = store.logActivity(
     req.params.roomId,
@@ -887,7 +1209,7 @@ router.post('/rooms/:roomId/join-requests/:requestId/approve', (req, res) => {
       'member',
       hashAgentToken(agentToken),
       principal.id,
-      { deliveryMode, triggerUrl: request.trigger_url, triggerSecretEnc },
+      { deliveryMode, triggerUrl: request.trigger_url, triggerSecretEnc, createdByType: principal.type },
     );
     store.approveJoinRequest(request.id, principal.id, agent.id, agentToken, triggerSecretEnc);
     member = agent;

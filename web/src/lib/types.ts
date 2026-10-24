@@ -1,6 +1,7 @@
 export type PrincipalType = 'user' | 'agent';
 export type Role = 'admin' | 'member' | 'viewer';
 export type RoomMode = 'chat' | 'code';
+export type RoomVisibility = 'public' | 'unlisted';
 export type TaskStatus = 'todo' | 'doing' | 'review' | 'done';
 export type MessageKind = 'chat' | 'instruction' | 'suggestion';
 export type PresenceStatus =
@@ -25,6 +26,7 @@ export interface SessionUser {
   id: string;
   name: string;
   email: string;
+  handle?: string;
 }
 
 export interface Session {
@@ -40,6 +42,9 @@ export interface RoomSummary {
   memberCount: number;
   code?: string;
   createdAt?: string;
+  visibility: RoomVisibility;
+  unreadCount: number;
+  pendingRequests: number;
 }
 
 export interface Member {
@@ -49,6 +54,83 @@ export interface Member {
   role: Role;
   joinedAt: string;
   description: string | null;
+  handle: string | null;
+  headline: string | null;
+}
+
+export interface ProfileRoom {
+  code: string;
+  name: string;
+  topic: string;
+  mode: RoomMode;
+  memberCount: number;
+  role?: Role;
+}
+
+export interface ProfileAgentLink {
+  handle: string;
+  name: string;
+  headline: string;
+}
+
+export interface ProfileOwner {
+  type: PrincipalType;
+  handle: string;
+  name: string;
+}
+
+export interface UserProfile {
+  type: 'user';
+  id: string;
+  handle: string;
+  name: string;
+  headline: string;
+  bio: string;
+  location: string;
+  website: string;
+  joinedAt: string;
+  rooms: ProfileRoom[];
+  agents: ProfileAgentLink[];
+  roomsHidden: boolean;
+  email?: string;
+  showRooms?: boolean;
+}
+
+export interface AgentProfile {
+  type: 'agent';
+  id: string;
+  handle: string;
+  name: string;
+  headline: string;
+  bio: string;
+  website: string;
+  capabilities: string[];
+  createdAt: string;
+  role: Role;
+  deliveryMode: DeliveryMode;
+  room: ProfileRoom | null;
+  owner: ProfileOwner | null;
+}
+
+export type Profile = UserProfile | AgentProfile;
+
+export interface UserProfilePatch {
+  name?: string;
+  handle?: string;
+  headline?: string;
+  bio?: string;
+  location?: string;
+  website?: string;
+  showRooms?: boolean;
+}
+
+export interface AgentProfilePatch {
+  name?: string;
+  handle?: string;
+  headline?: string;
+  bio?: string;
+  website?: string;
+  capabilities?: string[];
 }
 
 export interface Room {
@@ -59,6 +141,7 @@ export interface Room {
   createdAt: string;
   createdBy: string;
   code?: string;
+  visibility: RoomVisibility;
 }
 
 export interface Repo {
@@ -164,6 +247,7 @@ export interface RoomState {
   presence: PresenceEntry[];
   voice: VoiceParticipant[];
   joinRequests?: JoinRequest[];
+  unreadCount?: number;
 }
 
 export interface PublicRoom {
@@ -181,6 +265,7 @@ export interface PublicMember {
   type: PrincipalType;
   role: Role;
   description: string | null;
+  handle: string | null;
 }
 
 export interface RoomPreview {
@@ -254,9 +339,22 @@ export interface RoomActions {
   }): Promise<CreateAgentResult>;
   testTrigger(agentId: string): Promise<TriggerTestResult>;
   rotateTriggerSecret(agentId: string): Promise<{ triggerSecret: string }>;
+  rotateAgentToken(agentId: string): Promise<{ token: string }>;
+  updateRoom(patch: {
+    name?: string;
+    topic?: string;
+    visibility?: RoomVisibility;
+  }): Promise<void>;
+  deleteRoom(): Promise<void>;
+  leaveRoom(): Promise<void>;
+  deleteMessage(messageId: string): Promise<void>;
+  loadOlder(beforeSeq: number): Promise<Message[]>;
+  markRead(): void;
   setRole(member: Member, role: Role): Promise<void>;
   removeMember(member: Member): Promise<void>;
   approveJoinRequest(requestId: string): Promise<void>;
   denyJoinRequest(requestId: string): Promise<void>;
+  refreshRoom(): Promise<void>;
   copy(text: string, label: string): void;
+  notify(message: string): void;
 }

@@ -2,6 +2,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { handleFromName } from './handles.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const dataDir = resolve(here, '../data');
@@ -20,7 +21,13 @@ db.exec(`
     email TEXT NOT NULL UNIQUE COLLATE NOCASE,
     name TEXT NOT NULL,
     password_hash TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    handle TEXT,
+    headline TEXT NOT NULL DEFAULT '',
+    bio TEXT NOT NULL DEFAULT '',
+    location TEXT NOT NULL DEFAULT '',
+    website TEXT NOT NULL DEFAULT '',
+    show_rooms INTEGER NOT NULL DEFAULT 1
   );
 
   CREATE TABLE IF NOT EXISTS rooms (
@@ -31,7 +38,8 @@ db.exec(`
     code TEXT NOT NULL UNIQUE,
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    last_seq INTEGER NOT NULL DEFAULT 0
+    last_seq INTEGER NOT NULL DEFAULT 0,
+    visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'unlisted'))
   );
 
   CREATE TABLE IF NOT EXISTS agents (
@@ -42,7 +50,13 @@ db.exec(`
     role TEXT NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
     token_hash TEXT NOT NULL UNIQUE,
     created_by TEXT NOT NULL,
+    created_by_type TEXT NOT NULL DEFAULT 'user',
     created_at TEXT NOT NULL,
+    handle TEXT,
+    headline TEXT NOT NULL DEFAULT '',
+    bio TEXT NOT NULL DEFAULT '',
+    website TEXT NOT NULL DEFAULT '',
+    capabilities TEXT NOT NULL DEFAULT '',
     delivery_mode TEXT NOT NULL DEFAULT 'socket',
     trigger_url TEXT,
     trigger_secret_enc TEXT,
@@ -58,6 +72,14 @@ db.exec(`
     role TEXT NOT NULL CHECK (role IN ('admin', 'member', 'viewer')),
     joined_at TEXT NOT NULL,
     PRIMARY KEY (room_id, principal_type, principal_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS room_reads (
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    last_read_seq INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (room_id, user_id)
   );
 
   CREATE TABLE IF NOT EXISTS room_repos (
@@ -169,6 +191,7 @@ function addColumn(table: string, column: string, definition: string): void {
 }
 
 addColumn('rooms', 'last_seq', 'INTEGER NOT NULL DEFAULT 0');
+addColumn('rooms', 'visibility', "TEXT NOT NULL DEFAULT 'public'");
 addColumn('agents', 'delivery_mode', "TEXT NOT NULL DEFAULT 'socket'");
 addColumn('agents', 'trigger_url', 'TEXT');
 addColumn('agents', 'trigger_secret_enc', 'TEXT');
@@ -183,11 +206,75 @@ addColumn('messages', 'seq', 'INTEGER');
 addColumn('messages', 'mentions', 'TEXT');
 addColumn('messages', 'client_message_id', 'TEXT');
 
+addColumn('users', 'handle', 'TEXT');
+addColumn('users', 'headline', "TEXT NOT NULL DEFAULT ''");
+addColumn('users', 'bio', "TEXT NOT NULL DEFAULT ''");
+addColumn('users', 'location', "TEXT NOT NULL DEFAULT ''");
+addColumn('users', 'website', "TEXT NOT NULL DEFAULT ''");
+addColumn('users', 'show_rooms', 'INTEGER NOT NULL DEFAULT 1');
+addColumn('agents', 'handle', 'TEXT');
+addColumn('agents', 'headline', "TEXT NOT NULL DEFAULT ''");
+addColumn('agents', 'bio', "TEXT NOT NULL DEFAULT ''");
+addColumn('agents', 'website', "TEXT NOT NULL DEFAULT ''");
+addColumn('agents', 'capabilities', "TEXT NOT NULL DEFAULT ''");
+addColumn('agents', 'created_by_type', "TEXT NOT NULL DEFAULT 'user'");
+
+db.exec(`
+  UPDATE agents SET headline = description
+  WHERE headline = '' AND description <> '';
+`);
+
+/* Handles are public identifiers, so existing accounts and agents get a stable
+ * slug before the unique indexes are created. */
+function backfillHandles(): void {
+  const tables = [
+    { table: 'users', fallback: 'user' as const },
+    { table: 'agents', fallback: 'agent' as const },
+  ];
+  const records: { table: string; id: string; name: string; handle: string | null }[] = [];
+  for (const { table } of tables) {
+    const rows = db.prepare(`SELECT id, name, handle FROM ${table}`).all() as {
+      id: string;
+      name: string;
+      handle: string | null;
+    }[];
+    for (const row of rows) records.push({ table, ...row });
+  }
+
+  const taken = new Set(
+    records
+      .map((record) => record.handle?.trim().toLowerCase())
+      .filter((handle): handle is string => Boolean(handle)),
+  );
+
+  const assign = db.prepare('UPDATE users SET handle = ? WHERE id = ?');
+  const assignAgent = db.prepare('UPDATE agents SET handle = ? WHERE id = ?');
+  for (const record of records) {
+    if (record.handle?.trim()) continue;
+    const base = handleFromName(record.name, record.table === 'users' ? 'user' : 'agent');
+    let candidate = base;
+    let suffix = 2;
+    while (taken.has(candidate)) {
+      const tail = `-${suffix}`;
+      candidate = `${base.slice(0, 30 - tail.length)}${tail}`;
+      suffix += 1;
+    }
+    taken.add(candidate);
+    (record.table === 'users' ? assign : assignAgent).run(candidate, record.id);
+  }
+}
+
+backfillHandles();
+
 db.exec(`
   CREATE UNIQUE INDEX IF NOT EXISTS idx_messages_client
     ON messages(room_id, sender_id, client_message_id)
     WHERE client_message_id IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_messages_room_seq ON messages(room_id, seq);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_users_handle ON users(handle COLLATE NOCASE)
+    WHERE handle IS NOT NULL AND handle <> '';
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_handle ON agents(handle COLLATE NOCASE)
+    WHERE handle IS NOT NULL AND handle <> '';
 `);
 
 /* Backfill sequence numbers so existing rooms can catch up with after_seq. */

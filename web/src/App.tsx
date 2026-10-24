@@ -12,10 +12,13 @@ import type {
   PresenceEntry,
   PresenceStatus,
   Role,
+  Room,
   RoomActions,
   RoomMode,
   RoomState,
   RoomSummary,
+  RoomVisibility,
+  Profile,
   Session,
   Task,
   TaskInput,
@@ -26,7 +29,8 @@ import { AuthScreen } from './components/AuthScreen';
 import { Sidebar } from './components/Sidebar';
 import { RoomView } from './components/RoomView';
 import { Modal } from './components/Modal';
-import { BranchIcon, HashIcon, MenuIcon, PlusIcon } from './components/Icons';
+import { ProfileDialog } from './components/ProfileDialog';
+import { BranchIcon, GlobeIcon, HashIcon, MenuIcon, PlusIcon } from './components/Icons';
 
 function roomTarget(): string | null {
   const pathMatch = window.location.pathname.match(/^\/rooms?\/([A-Za-z0-9]+)/i);
@@ -57,11 +61,13 @@ export default function App({ initialCode }: AppProps = {}) {
   const [activeSocket, setActiveSocket] = useState<WebSocket | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [navOpen, setNavOpen] = useState(false);
+  const [profileOpen, setProfileOpen] = useState(false);
 
   const [newRoomOpen, setNewRoomOpen] = useState(false);
   const [roomName, setRoomName] = useState('');
   const [roomTopic, setRoomTopic] = useState('');
   const [roomMode, setRoomMode] = useState<RoomMode>('code');
+  const [roomVisibility, setRoomVisibility] = useState<RoomVisibility>('public');
   const [roomError, setRoomError] = useState<string | null>(null);
   const [creatingRoom, setCreatingRoom] = useState(false);
 
@@ -71,13 +77,57 @@ export default function App({ initialCode }: AppProps = {}) {
 
   const socketRef = useRef<WebSocket | null>(null);
   const activeIdRef = useRef<string | null>(null);
+  const roomsRef = useRef<RoomSummary[]>([]);
+  const roomStateRef = useRef<RoomState | null>(null);
+  const lastMarkedRef = useRef(0);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialSelected = useRef(false);
   const initialTarget = useRef<string | null>(initialCode ?? roomTarget());
 
   useEffect(() => {
     activeIdRef.current = activeId;
+    lastMarkedRef.current = 0;
   }, [activeId]);
+
+  useEffect(() => {
+    roomsRef.current = rooms;
+  }, [rooms]);
+
+  useEffect(() => {
+    roomStateRef.current = roomState;
+  }, [roomState]);
+
+  /* Sessions persist across profile edits; refresh the cached identity so the
+   * sidebar shows the current name and handle after a rename or reload. */
+  useEffect(() => {
+    if (!session) return;
+    let cancelled = false;
+    api
+      .me()
+      .then(({ principal }) => {
+        if (cancelled || !session || principal.type !== 'user') return;
+        if (principal.name === session.user.name && principal.handle === session.user.handle) {
+          return;
+        }
+        const next: Session = {
+          ...session,
+          user: {
+            ...session.user,
+            name: principal.name,
+            handle: principal.handle,
+            email: principal.email ?? session.user.email,
+          },
+        };
+        saveSession(next);
+        setSession(next);
+      })
+      .catch(() => {
+        // an expired session is handled by the rooms request
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!navOpen) return;
@@ -101,6 +151,37 @@ export default function App({ initialCode }: AppProps = {}) {
     setNotice(message);
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
     noticeTimer.current = setTimeout(() => setNotice(null), 3200);
+  }
+
+  function handleProfileSaved(profile: Profile) {
+    if (profile.type === 'user' && session) {
+      const next: Session = {
+        ...session,
+        user: { ...session.user, name: profile.name, handle: profile.handle },
+      };
+      saveSession(next);
+      setSession(next);
+    }
+    setRoomState((prev) => {
+      if (!prev) return prev;
+      const isMe = prev.me.type === profile.type && prev.me.id === profile.id;
+      return {
+        ...prev,
+        me: isMe ? { ...prev.me, name: profile.name } : prev.me,
+        members: prev.members.map((member) =>
+          member.type === profile.type && member.id === profile.id
+            ? {
+                ...member,
+                name: profile.name,
+                handle: profile.handle,
+                headline: profile.headline,
+                description:
+                  member.type === 'agent' ? profile.headline || null : member.description,
+              }
+            : member,
+        ),
+      };
+    });
   }
 
   function handleAuth(next: Session) {
@@ -185,6 +266,60 @@ export default function App({ initialCode }: AppProps = {}) {
     }
   }, [activeId, rooms]);
 
+  /* Anything visible in the open room counts as read. The server clamps the
+   * sequence, so a stale tab can never mark newer messages as seen. */
+  useEffect(() => {
+    if (!session || !activeId || !roomState || roomState.room.id !== activeId) return;
+    if (document.visibilityState !== 'visible') return;
+    const lastSeq = roomState.messages[roomState.messages.length - 1]?.seq ?? 0;
+    if (lastSeq <= lastMarkedRef.current) return;
+    lastMarkedRef.current = lastSeq;
+    api
+      .markRead(activeId, lastSeq)
+      .then(({ unreadCount }) => {
+        setRooms((prev) =>
+          prev.map((room) => (room.id === activeId ? { ...room, unreadCount } : room)),
+        );
+        setRoomState((prev) =>
+          prev && prev.room.id === activeId ? { ...prev, unreadCount } : prev,
+        );
+      })
+      .catch(() => {
+        lastMarkedRef.current = 0;
+      });
+  }, [activeId, roomState?.messages, session?.user.id]);
+
+  useEffect(() => {
+    if (!session) return;
+    const markVisibleRoomRead = () => {
+      if (document.visibilityState !== 'visible') return;
+      const id = activeIdRef.current;
+      const state = roomStateRef.current;
+      if (!id || !state || state.room.id !== id) return;
+      const lastSeq = state.messages[state.messages.length - 1]?.seq ?? 0;
+      if (lastSeq <= lastMarkedRef.current) return;
+      lastMarkedRef.current = lastSeq;
+      api
+        .markRead(id, lastSeq)
+        .then(({ unreadCount }) => {
+          setRooms((prev) =>
+            prev.map((room) => (room.id === id ? { ...room, unreadCount } : room)),
+          );
+        })
+        .catch(() => {
+          lastMarkedRef.current = 0;
+        });
+    };
+    document.addEventListener('visibilitychange', markVisibleRoomRead);
+    return () => document.removeEventListener('visibilitychange', markVisibleRoomRead);
+  }, [session?.user.id]);
+
+  useEffect(() => {
+    if (!session) return;
+    const unread = rooms.reduce((total, room) => total + (room.unreadCount ?? 0), 0);
+    document.title = unread > 0 ? `(${unread}) RoomForge` : 'RoomForge';
+  }, [rooms, session]);
+
   useEffect(() => {
     const handlePopState = () => {
       const target = roomTarget();
@@ -226,9 +361,67 @@ export default function App({ initialCode }: AppProps = {}) {
             if (!prev || prev.room.id !== payload.roomId) return prev;
             const messages = appendById(prev.messages, payload.message as Message);
             if (messages === prev.messages) return prev;
-            messages.sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+            messages.sort((left, right) => left.seq - right.seq);
             return { ...prev, messages };
           });
+          break;
+        case 'message.deleted':
+          setRoomState((prev) =>
+            prev && prev.room.id === payload.roomId
+              ? { ...prev, messages: prev.messages.filter((message) => message.id !== payload.messageId) }
+              : prev,
+          );
+          break;
+        case 'room.updated': {
+          const room = payload.room as Room;
+          if (!room?.id) break;
+          setRooms((prev) =>
+            prev.map((summary) =>
+              summary.id === room.id
+                ? {
+                    ...summary,
+                    name: room.name,
+                    topic: room.topic,
+                    visibility: room.visibility,
+                  }
+                : summary,
+            ),
+          );
+          setRoomState((prev) =>
+            prev && prev.room.id === room.id ? { ...prev, room: { ...prev.room, ...room } } : prev,
+          );
+          break;
+        }
+        case 'room.deleted':
+          setRooms((prev) => prev.filter((summary) => summary.id !== payload.roomId));
+          if (payload.roomId === activeIdRef.current) {
+            setRoomState(null);
+            setActiveId(roomsRef.current.find((summary) => summary.id !== payload.roomId)?.id ?? null);
+          }
+          showNotice(
+            String(payload.message ?? `“${payload.name ?? 'This room'}” was deleted.`),
+          );
+          break;
+        case 'room.unread': {
+          const viewing =
+            payload.roomId === activeIdRef.current && document.visibilityState === 'visible';
+          setRooms((prev) =>
+            prev.map((summary) =>
+              summary.id === payload.roomId
+                ? { ...summary, unreadCount: viewing ? 0 : Number(payload.unreadCount ?? 0) }
+                : summary,
+            ),
+          );
+          break;
+        }
+        case 'room.pending':
+          setRooms((prev) =>
+            prev.map((summary) =>
+              summary.id === payload.roomId
+                ? { ...summary, pendingRequests: Number(payload.pendingRequests ?? 0) }
+                : summary,
+            ),
+          );
           break;
         case 'presence.update':
           if (payload.roomId !== active) break;
@@ -295,10 +488,10 @@ export default function App({ initialCode }: AppProps = {}) {
         case 'removed':
           setRooms((prev) => prev.filter((room) => room.id !== payload.roomId));
           if (payload.roomId === activeIdRef.current) {
-            setActiveId(null);
             setRoomState(null);
+            setActiveId(roomsRef.current.find((room) => room.id !== payload.roomId)?.id ?? null);
           }
-          showNotice('You were removed from the room.');
+          showNotice(String(payload.message ?? 'You were removed from the room.'));
           break;
         case 'error':
           showNotice(String(payload.message ?? 'Realtime error'));
@@ -497,6 +690,92 @@ export default function App({ initialCode }: AppProps = {}) {
       return api.rotateTriggerSecret(agentId);
     },
 
+    rotateAgentToken(agentId: string) {
+      return api.rotateAgentToken(agentId);
+    },
+
+    async updateRoom(patch) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      const { room } = await api.updateRoom(roomId, patch);
+      const summary = { name: room.name, topic: room.topic, visibility: room.visibility };
+      setRooms((prev) =>
+        prev.map((candidate) =>
+          candidate.id === roomId ? { ...candidate, ...summary } : candidate,
+        ),
+      );
+      setRoomState((prev) =>
+        prev && prev.room.id === roomId
+          ? { ...prev, room: { ...prev.room, ...summary } }
+          : prev,
+      );
+    },
+
+    async deleteRoom() {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.deleteRoom(roomId);
+      const remaining = roomsRef.current.filter((room) => room.id !== roomId);
+      setRooms(remaining);
+      setRoomState(null);
+      setActiveId(remaining[0]?.id ?? null);
+      showNotice('Room deleted');
+    },
+
+    async leaveRoom() {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.leaveRoom(roomId);
+      const remaining = roomsRef.current.filter((room) => room.id !== roomId);
+      setRooms(remaining);
+      setRoomState(null);
+      setActiveId(remaining[0]?.id ?? null);
+      showNotice('You left the room');
+    },
+
+    async deleteMessage(messageId: string) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.deleteMessage(roomId, messageId);
+      setRoomState((prev) =>
+        prev && prev.room.id === roomId
+          ? { ...prev, messages: prev.messages.filter((message) => message.id !== messageId) }
+          : prev,
+      );
+    },
+
+    async loadOlder(beforeSeq: number) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return [];
+      const { messages } = await api.messages(roomId, beforeSeq, 60);
+      setRoomState((prev) => {
+        if (!prev || prev.room.id !== roomId) return prev;
+        const known = new Set(prev.messages.map((message) => message.id));
+        const older = messages.filter((message) => !known.has(message.id));
+        if (older.length === 0) return prev;
+        return {
+          ...prev,
+          messages: [...older, ...prev.messages].sort((left, right) => left.seq - right.seq),
+        };
+      });
+      return messages;
+    },
+
+    markRead() {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      api
+        .markRead(roomId)
+        .then(({ unreadCount }) =>
+          setRooms((prev) =>
+            prev.map((room) => (room.id === roomId ? { ...room, unreadCount } : room)),
+          ),
+        )
+        .catch(() => {
+          // the next visible message will retry
+        });
+    },
+
     async setRole(member: Member, role: Role) {
       const roomId = activeIdRef.current;
       if (!roomId) return;
@@ -525,8 +804,23 @@ export default function App({ initialCode }: AppProps = {}) {
       await refreshIfOffline(roomId);
     },
 
+    async refreshRoom() {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      try {
+        const state = await api.room(roomId);
+        setRoomState(state);
+      } catch {
+        // the triggering action already reports its own error
+      }
+    },
+
     copy(text: string, label: string) {
       void copy(text, label);
+    },
+
+    notify(message: string) {
+      showNotice(message);
     },
   };
 
@@ -539,6 +833,7 @@ export default function App({ initialCode }: AppProps = {}) {
         name: roomName.trim(),
         topic: roomTopic.trim(),
         mode: roomMode,
+        visibility: roomVisibility,
       });
       const { rooms: list } = await api.rooms();
       setRooms(list);
@@ -549,6 +844,7 @@ export default function App({ initialCode }: AppProps = {}) {
       setRoomName('');
       setRoomTopic('');
       setRoomMode('code');
+      setRoomVisibility('public');
       showNotice('Room created');
     } catch (error) {
       setRoomError(error instanceof Error ? error.message : 'Could not create the room');
@@ -581,6 +877,10 @@ export default function App({ initialCode }: AppProps = {}) {
         connected={connected}
         open={navOpen}
         onClose={() => setNavOpen(false)}
+        onOpenProfile={() => {
+          setNavOpen(false);
+          setProfileOpen(true);
+        }}
         onSelect={(roomId) => {
           setActiveId(roomId);
           setNavOpen(false);
@@ -741,6 +1041,36 @@ export default function App({ initialCode }: AppProps = {}) {
                 </div>
               </label>
             </div>
+            <div className="mode-choice">
+              <label className={`mode-option ${roomVisibility === 'public' ? 'active' : ''}`}>
+                <input
+                  type="radio"
+                  name="visibility"
+                  value="public"
+                  checked={roomVisibility === 'public'}
+                  onChange={() => setRoomVisibility('public')}
+                />
+                <GlobeIcon size={18} />
+                <div>
+                  <strong>Public listing</strong>
+                  <span>Show in Discover so people can preview and request to join.</span>
+                </div>
+              </label>
+              <label className={`mode-option ${roomVisibility === 'unlisted' ? 'active' : ''}`}>
+                <input
+                  type="radio"
+                  name="visibility"
+                  value="unlisted"
+                  checked={roomVisibility === 'unlisted'}
+                  onChange={() => setRoomVisibility('unlisted')}
+                />
+                <HashIcon size={18} />
+                <div>
+                  <strong>Unlisted</strong>
+                  <span>Hidden from Discover. Only people with the link can request access.</span>
+                </div>
+              </label>
+            </div>
             {roomError ? <p className="form-error">{roomError}</p> : null}
             <button type="submit" className="btn btn-primary btn-block" disabled={creatingRoom || !roomName.trim()}>
               {creatingRoom ? 'Creating…' : 'Create room'}
@@ -776,6 +1106,15 @@ export default function App({ initialCode }: AppProps = {}) {
             </button>
           </form>
         </Modal>
+      ) : null}
+
+      {profileOpen ? (
+        <ProfileDialog
+          mode="me"
+          onClose={() => setProfileOpen(false)}
+          onSaved={handleProfileSaved}
+          onNotice={showNotice}
+        />
       ) : null}
 
       {notice ? <div className="toast">{notice}</div> : null}

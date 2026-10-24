@@ -12,6 +12,7 @@ import type {
   PresenceEntry,
   PresenceStatus,
   Principal,
+  PrincipalType,
   Role,
   RoomState,
   VoiceParticipant,
@@ -182,15 +183,115 @@ export function broadcastMembers(roomId: string): void {
   broadcastPresence(roomId);
 }
 
+/* Keep already-open sockets and voice tiles in sync when a profile name
+ * changes; tokens resolve fresh on the next request, sockets do not. */
+export function syncPrincipalProfile(
+  type: PrincipalType,
+  id: string,
+  name: string,
+  handle: string | null,
+): void {
+  for (const client of clients.values()) {
+    if (client.principal.type !== type || client.principal.id !== id) continue;
+    client.principal = {
+      ...client.principal,
+      name,
+      ...(handle ? { handle } : { handle: undefined }),
+    };
+  }
+  const changedRooms = new Set<string>();
+  for (const [roomId, room] of voiceRooms) {
+    for (const session of room.values()) {
+      if (session.participant.type !== type || session.participant.id !== id) continue;
+      session.participant = { ...session.participant, name };
+      changedRooms.add(roomId);
+    }
+  }
+  for (const roomId of changedRooms) broadcastVoice(roomId);
+}
+
 /* Pending requests are admin-only, so this does not use the room-wide broadcast. */
 export function broadcastJoinRequests(roomId: string): void {
   const requests = store.listPendingJoinRequests(roomId);
   const body = JSON.stringify({ roomId, type: 'join.requests.updated', requests });
   for (const client of clients.values()) {
-    if (!client.rooms.has(roomId) || client.ws.readyState !== WebSocket.OPEN) continue;
-    if (store.getMembership(roomId, client.principal)?.role === 'admin') {
-      client.ws.send(body);
+    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    if (store.getMembership(roomId, client.principal)?.role !== 'admin') continue;
+    if (client.rooms.has(roomId)) client.ws.send(body);
+    send(client.ws, { type: 'room.pending', roomId, pendingRequests: requests.length });
+  }
+}
+
+export function broadcastRoomUpdated(roomId: string): void {
+  const room = store.getRoom(roomId);
+  if (!room) return;
+  for (const client of clients.values()) {
+    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    if (!client.rooms.has(roomId) && !store.getMembership(roomId, client.principal)) continue;
+    send(client.ws, { type: 'room.updated', roomId, room });
+  }
+}
+
+export function broadcastRoomDeleted(roomId: string): void {
+  const name = store.getRoom(roomId)?.name ?? 'This room';
+  const voice = voiceRooms.get(roomId);
+  if (voice) {
+    for (const session of voice.values()) {
+      send(session.ws, { type: 'voice.replaced', roomId, message: 'This room was deleted.' });
     }
+    voiceRooms.delete(roomId);
+  }
+  presence.delete(roomId);
+  pausedRooms.delete(roomId);
+  for (const client of clients.values()) {
+    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    const member =
+      client.rooms.has(roomId) || Boolean(store.getMembership(roomId, client.principal));
+    if (!member) continue;
+    send(client.ws, { type: 'room.deleted', roomId, name, message: `“${name}” was deleted.` });
+    client.rooms.delete(roomId);
+    if (client.principal.type === 'agent') {
+      setTimeout(() => {
+        try {
+          client.ws.close(4004, 'room deleted');
+        } catch {
+          // already closing
+        }
+      }, 50);
+    }
+  }
+}
+
+/* Unread counts are per user, so fan out a small update to every socket the
+ * member has open, whether or not that socket is currently in the room. */
+export function broadcastUnread(roomId: string): void {
+  for (const client of clients.values()) {
+    if (client.ws.readyState !== WebSocket.OPEN || client.principal.type !== 'user') continue;
+    if (!store.getMembership(roomId, client.principal)) continue;
+    send(client.ws, {
+      type: 'room.unread',
+      roomId,
+      unreadCount: store.getUnreadCount(roomId, client.principal.id),
+    });
+  }
+}
+
+export function broadcastMessageDeleted(roomId: string, messageId: string): void {
+  broadcast(roomId, { type: 'message.deleted', roomId, messageId });
+  broadcastUnread(roomId);
+}
+
+export function disconnectAgent(agentId: string, message: string): void {
+  for (const client of clients.values()) {
+    if (client.principal.type !== 'agent' || client.principal.id !== agentId) continue;
+    send(client.ws, { type: 'error', message });
+    setTimeout(() => {
+      try {
+        client.ws.close(4008, 'token rotated');
+      } catch {
+        // already closing
+      }
+    }, 50);
   }
 }
 
@@ -260,6 +361,7 @@ export function buildRoomState(roomId: string, principal: Principal): RoomState 
     ...(membership.role === 'admin'
       ? { joinRequests: store.listPendingJoinRequests(roomId) }
       : {}),
+    ...(principal.type === 'user' ? { unreadCount: store.getUnreadCount(roomId, principal.id) } : {}),
   };
 }
 
@@ -292,13 +394,18 @@ export function setPresence(
   return presenceList(roomId);
 }
 
-export function evictFromRoom(roomId: string, type: string, id: string): void {
+export function evictFromRoom(
+  roomId: string,
+  type: string,
+  id: string,
+  message = 'You were removed from the room.',
+): void {
   presence.get(roomId)?.delete(principalKey(type, id));
   removeVoiceForPrincipal(roomId, type, id);
   for (const client of clients.values()) {
     if (client.rooms.has(roomId) && client.principal.type === type && client.principal.id === id) {
       client.rooms.delete(roomId);
-      send(client.ws, { type: 'removed', roomId });
+      send(client.ws, { type: 'removed', roomId, message });
     }
   }
   broadcastPresence(roomId);
@@ -353,6 +460,7 @@ function enforceAgentSend(roomId: string, agentId: string): void {
     pausedRooms.add(roomId);
     const notice = store.insertSystemMessage(roomId, 'Agents paused until a human replies.');
     broadcast(roomId, { type: 'message.new', message: notice });
+    broadcastUnread(roomId);
     throw new HttpError(429, 'loop_guard');
   }
 
@@ -410,6 +518,7 @@ export function createRoomMessage(input: CreateRoomMessageInput): { message: Mes
 
   if (input.principal.type === 'user') pausedRooms.delete(input.roomId);
   broadcast(input.roomId, { type: 'message.new', message });
+  broadcastUnread(input.roomId);
 
   if (input.kind !== 'chat') {
     const label = input.kind === 'instruction' ? 'instruction' : 'suggestion';

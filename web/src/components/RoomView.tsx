@@ -5,6 +5,7 @@ import { initial, presenceMeta } from '../lib/format';
 import { ChatPanel } from './ChatPanel';
 import { RightPanel } from './RightPanel';
 import type { PanelTab } from './RightPanel';
+import { RoomSettingsDialog } from './RoomSettingsDialog';
 import { VoiceStage } from './VoiceStage';
 import {
   BotIcon,
@@ -13,6 +14,7 @@ import {
   HashIcon,
   MenuIcon,
   PanelsIcon,
+  SlidersIcon,
   UsersIcon,
   XIcon,
 } from './Icons';
@@ -41,6 +43,7 @@ export function RoomView({
     participants: state.voice ?? [],
   });
   const [detailsOpen, setDetailsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelTab>('people');
   const pendingRequests = state.me.role === 'admin' ? state.joinRequests ?? [] : [];
   const pendingCount = pendingRequests.length;
@@ -56,6 +59,7 @@ export function RoomView({
 
   useEffect(() => {
     setDetailsOpen(false);
+    setSettingsOpen(false);
   }, [state.room.id]);
 
   useEffect(() => {
@@ -100,6 +104,11 @@ export function RoomView({
               <span className="visually-hidden">{isCode ? 'Code room' : 'Chat room'}</span>
             </span>
             <h1>{state.room.name}</h1>
+            {state.room.visibility === 'unlisted' ? (
+              <span className="tag tag-gray" title="Hidden from the public room directory">
+                unlisted
+              </span>
+            ) : null}
           </div>
           <p className="room-topic">{state.room.topic || 'No topic set for this room.'}</p>
         </div>
@@ -140,6 +149,15 @@ export function RoomView({
               <span className="invite-code-small">{state.room.code}</span>
             </button>
           ) : null}
+          <button
+            type="button"
+            className="icon-btn room-settings-btn"
+            aria-label="Room settings"
+            title="Room settings"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <SlidersIcon size={16} />
+          </button>
           <button
             type="button"
             className="btn btn-ghost btn-small workspace-btn"
@@ -222,6 +240,14 @@ export function RoomView({
         </div>
         <RightPanel state={state} actions={actions} tab={panelTab} onTabChange={setPanelTab} />
       </div>
+
+      {settingsOpen ? (
+        <RoomSettingsDialog
+          state={state}
+          actions={actions}
+          onClose={() => setSettingsOpen(false)}
+        />
+      ) : null}
     </div>
   );
 }

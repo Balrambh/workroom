@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { ApiError, api } from '../lib/api';
+import { profilePath } from '../lib/profile';
 import { clearSession, readSession } from '../lib/session';
 import type { JoinState, RoomPreview, Session } from '../lib/types';
 import {
@@ -280,19 +281,37 @@ export function RoomLanding({ code }: RoomLandingProps) {
             <div className="landing-members">
               <span className="section-label">People in the room</span>
               <div className="landing-member-grid">
-                {preview.members.map((member) => (
-                  <div className="landing-member" key={`${member.type}-${member.name}`}>
-                    <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
-                      {member.type === 'agent' ? <BotIcon size={15} /> : initials(member.name)}
-                    </span>
-                    <div>
-                      <strong>{member.name}</strong>
-                      <span>
-                        {member.type === 'agent' ? 'Agent' : 'Human'} · {member.role}
+                {preview.members.map((member) => {
+                  const href = profilePath(member.type, member.handle);
+                  const card = (
+                    <>
+                      <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
+                        {member.type === 'agent' ? <BotIcon size={15} /> : initials(member.name)}
                       </span>
+                      <div>
+                        <strong>{member.name}</strong>
+                        <span>
+                          {member.type === 'agent' ? 'Agent' : 'Human'} · {member.role}
+                        </span>
+                      </div>
+                      {href ? <ArrowUpRightIcon size={12} /> : null}
+                    </>
+                  );
+                  return href ? (
+                    <a
+                      className="landing-member landing-member-link"
+                      href={href}
+                      key={`${member.type}-${member.name}`}
+                      title={`Open ${member.name}'s public profile`}
+                    >
+                      {card}
+                    </a>
+                  ) : (
+                    <div className="landing-member" key={`${member.type}-${member.name}`}>
+                      {card}
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
 

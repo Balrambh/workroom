@@ -11,8 +11,19 @@ import type {
   TriggerTestResult,
 } from '../lib/types';
 import { initial, presenceMeta, roleMeta } from '../lib/format';
+import { profilePath } from '../lib/profile';
 import { Modal } from './Modal';
-import { ArrowUpRightIcon, BotIcon, CheckIcon, CopyIcon, PlusIcon, TrashIcon, XIcon } from './Icons';
+import { ProfileDialog } from './ProfileDialog';
+import {
+  ArrowUpRightIcon,
+  BotIcon,
+  CheckIcon,
+  CopyIcon,
+  PencilIcon,
+  PlusIcon,
+  TrashIcon,
+  XIcon,
+} from './Icons';
 
 interface PeoplePanelProps {
   state: RoomState;
@@ -46,6 +57,9 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
   const [testResults, setTestResults] = useState<Record<string, TriggerTestResult>>({});
   const [rotated, setRotated] = useState<{ agentId: string; secret: string } | null>(null);
   const [rotating, setRotating] = useState<string | null>(null);
+  const [rotatedKey, setRotatedKey] = useState<{ agentId: string; token: string } | null>(null);
+  const [rotatingKey, setRotatingKey] = useState<string | null>(null);
+  const [profileAgent, setProfileAgent] = useState<Member | null>(null);
 
   const pendingRequests = state.joinRequests ?? [];
   const presenceById = new Map(state.presence.map((entry) => [`${entry.type}:${entry.id}`, entry]));
@@ -95,10 +109,32 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
     try {
       const { triggerSecret } = await actions.rotateTriggerSecret(agent.id);
       setRotated({ agentId: agent.id, secret: triggerSecret });
+      setRotatedKey(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not rotate the secret');
     } finally {
       setRotating(null);
+    }
+  }
+
+  async function rotateKey(agent: Member) {
+    if (
+      !window.confirm(
+        `Rotate ${agent.name}'s connection key? The agent is disconnected immediately and the old key stops working.`,
+      )
+    ) {
+      return;
+    }
+    setError(null);
+    setRotatingKey(agent.id);
+    try {
+      const { token } = await actions.rotateAgentToken(agent.id);
+      setRotatedKey({ agentId: agent.id, token });
+      setRotated(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not rotate the connection key');
+    } finally {
+      setRotatingKey(null);
     }
   }
 
@@ -293,7 +329,19 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                 </span>
                 <div className="member-main">
                   <div className="member-name">
-                    {member.name}
+                    {member.handle ? (
+                      <a
+                        className="member-name-link"
+                        href={profilePath(member.type, member.handle) ?? '#'}
+                        target="_blank"
+                        rel="noreferrer"
+                        title={`Open ${member.name}'s public profile`}
+                      >
+                        {member.name} <ArrowUpRightIcon size={10} />
+                      </a>
+                    ) : (
+                      member.name
+                    )}
                     {isMe ? <span className="tag tag-gray">you</span> : null}
                     {member.type === 'agent' ? <span className="tag tag-violet">agent</span> : null}
                     {member.type === 'agent' ? <span className="tag tag-gray">{mode}</span> : null}
@@ -336,6 +384,13 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                     <button
                       type="button"
                       className="btn btn-quiet btn-tiny"
+                      onClick={() => setProfileAgent(member)}
+                    >
+                      <PencilIcon size={12} /> Edit profile
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-tiny"
                       disabled={mode !== 'trigger' || testing === member.id}
                       title={
                         mode === 'trigger'
@@ -353,6 +408,15 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                       onClick={() => rotateSecret(member)}
                     >
                       {rotating === member.id ? 'Rotating…' : 'Rotate secret'}
+                    </button>
+                    <button
+                      type="button"
+                      className="btn btn-quiet btn-tiny"
+                      disabled={rotatingKey === member.id}
+                      title="Issue a new API key for this agent"
+                      onClick={() => rotateKey(member)}
+                    >
+                      {rotatingKey === member.id ? 'Rotating…' : 'Rotate key'}
                     </button>
                   </div>
                   {testResult ? (
@@ -372,6 +436,23 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
                       >
                         <CopyIcon size={14} /> Copy
                       </button>
+                    </div>
+                  ) : null}
+                  {rotatedKey?.agentId === member.id ? (
+                    <div className="agent-key-rotated">
+                      <span className="agent-wake-result ok">
+                        New connection key — shown once. Reconnect {member.name} now.
+                      </span>
+                      <div className="token-box">
+                        <code>{rotatedKey.token}</code>
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-small"
+                          onClick={() => actions.copy(rotatedKey.token, 'Connection key')}
+                        >
+                          <CopyIcon size={14} /> Copy
+                        </button>
+                      </div>
                     </div>
                   ) : null}
                 </div>
@@ -552,6 +633,18 @@ export function PeoplePanel({ state, actions }: PeoplePanelProps) {
             </form>
           )}
         </Modal>
+      ) : null}
+
+      {profileAgent ? (
+        <ProfileDialog
+          mode="agent"
+          agentId={profileAgent.id}
+          onClose={() => setProfileAgent(null)}
+          onSaved={() => {
+            void actions.refreshRoom();
+          }}
+          onNotice={actions.notify}
+        />
       ) : null}
     </div>
   );
