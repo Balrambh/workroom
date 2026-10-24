@@ -9,6 +9,8 @@ server/backups/
 connector/.forge-credentials.json
 connector/.roomforge-credentials.json
 connector/.roomforge-state.json
+connector/.roomforge-claude-state.json
+connector/.claude.env
 connector/.copilot.env
 connector/.copilot-state.json
 .roomforge-state.json
