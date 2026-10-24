@@ -37,20 +37,12 @@ export class ApiError extends Error {
   }
 }
 
-let authToken = '';
-
-export function setAuthToken(token: string): void {
-  authToken = token;
-}
-
 async function request<T>(path: string, options: { method?: string; body?: unknown } = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
     method: options.method ?? 'GET',
-    headers: {
-      ...(options.body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(authToken ? { authorization: `Bearer ${authToken}` } : {}),
-    },
+    headers: options.body !== undefined ? { 'content-type': 'application/json' } : {},
     body: options.body !== undefined ? JSON.stringify(options.body) : undefined,
+    credentials: 'same-origin',
   });
 
   if (!response.ok) {
@@ -75,6 +67,10 @@ export const api = {
 
   login(input: { email: string; password: string }): Promise<Session> {
     return request<Session>('/auth/login', { method: 'POST', body: input });
+  },
+
+  logout(): Promise<void> {
+    return request<void>('/auth/logout', { method: 'POST' });
   },
 
   me(): Promise<{

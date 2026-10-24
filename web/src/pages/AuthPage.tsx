@@ -1,5 +1,4 @@
 import { useEffect } from 'react';
-import { setAuthToken } from '../lib/api';
 import { usePageMeta } from '../lib/meta';
 import { readSession, saveSession } from '../lib/session';
 import type { Session } from '../lib/types';
@@ -25,7 +24,6 @@ export function AuthPage({ initialMode }: { initialMode: 'login' | 'register' })
   }, [next]);
 
   function handleAuth(session: Session) {
-    setAuthToken(session.token);
     saveSession(session);
     window.location.assign(next);
   }

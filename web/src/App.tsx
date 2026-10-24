@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { FormEvent } from 'react';
-import { ApiError, api, setAuthToken } from './lib/api';
+import { ApiError, api } from './lib/api';
 import { clearSession, readSession, saveSession } from './lib/session';
 import type {
   Activity,
@@ -97,11 +97,6 @@ export default function App({ initialCode }: AppProps = {}) {
     roomStateRef.current = roomState;
   }, [roomState]);
 
-  useEffect(() => {
-    if (!session) return;
-    setAuthToken(session.token);
-  }, [session]);
-
   /* Sessions persist across profile edits; refresh the cached identity so the
    * sidebar shows the current name and handle after a rename or reload. */
   useEffect(() => {
@@ -132,7 +127,7 @@ export default function App({ initialCode }: AppProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!navOpen) return;
@@ -150,7 +145,7 @@ export default function App({ initialCode }: AppProps = {}) {
     if (next && next.startsWith('/') && !next.startsWith('//')) {
       window.location.assign(next);
     }
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   function showNotice(message: string) {
     setNotice(message);
@@ -190,7 +185,6 @@ export default function App({ initialCode }: AppProps = {}) {
   }
 
   function handleAuth(next: Session) {
-    setAuthToken(next.token);
     saveSession(next);
     initialSelected.current = false;
     initialTarget.current = roomTarget();
@@ -202,7 +196,7 @@ export default function App({ initialCode }: AppProps = {}) {
   }
 
   function handleLogout() {
-    setAuthToken('');
+    void api.logout().catch(() => {});
     clearSession();
     setSession(null);
     setRooms([]);
@@ -241,7 +235,7 @@ export default function App({ initialCode }: AppProps = {}) {
     return () => {
       cancelled = true;
     };
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!session || !roomsLoaded) return;
@@ -293,7 +287,7 @@ export default function App({ initialCode }: AppProps = {}) {
       .catch(() => {
         lastMarkedRef.current = 0;
       });
-  }, [activeId, roomState?.messages, session?.token]);
+  }, [activeId, roomState?.messages, session?.user.id]);
 
   useEffect(() => {
     if (!session) return;
@@ -318,7 +312,7 @@ export default function App({ initialCode }: AppProps = {}) {
     };
     document.addEventListener('visibilitychange', markVisibleRoomRead);
     return () => document.removeEventListener('visibilitychange', markVisibleRoomRead);
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!session) return;
@@ -510,9 +504,7 @@ export default function App({ initialCode }: AppProps = {}) {
     const openSocket = () => {
       if (disposed) return;
       const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
-      socket = new WebSocket(
-        `${protocol}://${window.location.host}/ws?token=${encodeURIComponent(session.token)}`,
-      );
+      socket = new WebSocket(`${protocol}://${window.location.host}/ws`);
       socketRef.current = socket;
 
       socket.onopen = () => {
@@ -552,7 +544,7 @@ export default function App({ initialCode }: AppProps = {}) {
       setConnected(false);
       setActiveSocket(null);
     };
-  }, [session?.token]);
+  }, [session?.user.id]);
 
   useEffect(() => {
     if (!session || !roomsLoaded) return;
@@ -591,7 +583,7 @@ export default function App({ initialCode }: AppProps = {}) {
         current.send(JSON.stringify({ type: 'room.leave', roomId: activeId }));
       }
     };
-  }, [activeId, session?.token, roomsLoaded]);
+  }, [activeId, session?.user.id, roomsLoaded]);
 
   async function refreshIfOffline(roomId: string) {
     if (socketRef.current?.readyState === WebSocket.OPEN) return;

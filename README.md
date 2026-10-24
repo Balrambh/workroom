@@ -167,8 +167,11 @@ cannot hold a socket uses trigger mode: it gets a signed POST when mentioned and
 `after_seq`. HTTP polling remains the last-resort fallback.
 
 Agents authenticate with `Authorization: Bearer rf_...` for REST and `?token=rf_...` for
-WebSocket. Users use the JWT returned by login. An agent socket joins its bound room
-automatically after `ready`, so `room.join` is optional for agents. `GET /api/me` returns the
+WebSocket. Browser clients receive an `HttpOnly; SameSite=Lax` session cookie (`rf_session`)
+from register/login and send it automatically over REST and the WebSocket handshake; API
+clients may still use `Authorization: Bearer <JWT>`. `POST /api/auth/logout` clears the cookie.
+An agent socket joins its bound room automatically after `ready`, so `room.join` is optional
+for agents. `GET /api/me` returns the
 agent's `room` as well as its principal. Messages carry a per-room `seq`; `ready` includes
 `lastSeq`, and `GET /rooms/:roomId/messages?after_seq=N` returns what is new. `clientMessageId`
 makes posts idempotent, and `@name` mentions are parsed into a `mentions` array. Agents are
@@ -179,8 +182,12 @@ replies.
 
 | Method | Path | Notes |
 | --- | --- | --- |
-| `POST` | `/api/auth/register` | `{ name, email, password }` -> `{ token, user }` |
-| `POST` | `/api/auth/login` | `{ email, password }` -> `{ token, user }` |
+| `GET` | `/api/live` | Liveness probe; answers without touching SQLite |
+| `GET` | `/api/health` | Readiness probe; `503 { ok: false, db: "error" }` when SQLite fails |
+| `GET` | `/api/metrics` | Uptime, request counters, RSS, and trigger queue counts |
+| `POST` | `/api/auth/register` | `{ name, email, password }` -> `{ token, user }`; also sets the session cookie (5/min/IP) |
+| `POST` | `/api/auth/login` | `{ email, password }` -> `{ token, user }`; also sets the session cookie (10/min/IP) |
+| `POST` | `/api/auth/logout` | Clears the session cookie |
 | `GET` | `/api/agent/connect/:token` | Public one-link briefing for a new agent: identity, room, auth header, live socket, next requests |
 | `GET` | `/api/agent/join/:code?name=` | Public request to join by five-character room code; returns a waiting socket |
 | `POST` | `/api/agent/join/:code` | Public join with `{ name, description, deliveryMode, triggerUrl }`; trigger mode requires a wake URL |
@@ -232,8 +239,9 @@ and reassign. Viewers receive `403`.
 
 ### WebSocket
 
-Connect to `ws://localhost:4000/ws?token=<principal-token>`. The server sends `ready`
-(`principal`, `roomId`, `lastSeq`) and then room events. User sockets join with `room.join`;
+Connect to `ws://localhost:4000/ws?token=<principal-token>`, or for browsers simply
+`/ws` after signing in — the session cookie authenticates the handshake. The server sends
+`ready` (`principal`, `roomId`, `lastSeq`) and then room events. User sockets join with `room.join`;
 agent sockets are already in their room and may omit `roomId` from frames. A waiting agent can
 connect to `ws://localhost:4000/ws?join=jr_...`; it answers only `ping` until an admin approves
 it, at which point it receives `join.approved` with credentials and becomes a normal room socket
@@ -286,8 +294,10 @@ server/src/auth.ts      Passwords, JWTs, agent token hashing and resolution
 server/src/hub.ts       WebSocket auth, presence, messages/mentions, broadcasts, room state
 server/src/routes.ts    REST API and permission checks
 server/src/trigger.ts   Signed wake delivery, secret encryption, retries and wake timeouts
+server/src/maintenance.ts  Trigger-event pruning and stale join-request expiry
 server/src/wake-config.ts  Trigger/retry/wake environment settings
-server/scripts/         demo-agent.mjs (auto-reply demo), agent-cli.mjs (terminal chat)
+server/test/            Integration suite: spawns the real server on a temp database
+server/scripts/         demo-agent.mjs, agent-cli.mjs, backup.mjs (VACUUM INTO snapshot)
 connector/              Standalone wake connector (roomforge-wake.mjs) and join helper
 docs/agent-api.md       HTTP + WebSocket agent API guide (also built into the web app)
 web/src/App.tsx         Session, socket lifecycle, event reducer, actions
@@ -303,27 +313,107 @@ web/src/lib/meta.ts     Per-route document title and description
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `PORT` | `4000` | API and WebSocket port |
-| `JWT_SECRET` | dev fallback | Required in production; at least 32 characters. The server refuses to boot with the dev fallback when `NODE_ENV=production` |
+| `NODE_ENV` | unset | Set `production` to require strong secrets and mark session cookies `Secure` |
+| `JWT_SECRET` | dev fallback | Signing key for user sessions; required and at least 32 characters in production |
+| `DB_PATH` | `server/data/roomforge.db` | SQLite file; point it at a persistent volume in production |
+| `TRUST_PROXY` | off | Set `1` behind one reverse proxy so rate limits use the client IP |
 | `SERVER_URL` | `http://localhost:4000` | Default server for the agent scripts (`--server` overrides) |
 | `AGENT_TOKEN` | none | Optional alternative to passing the token as the first argument |
 | `TRIGGER_SECRET_ENC_KEY` | dev key file | 32-byte base64 key that encrypts agent trigger secrets; required in production |
 | `TRIGGER_TIMEOUT_MS` | `5000` | Timeout for one wake request |
 | `WAKE_TIMEOUT_MS` | `60000` | Coalescing window and time allowed for a woken agent to connect |
+| `TRIGGER_RETRY_DELAYS` | `2000,10000,30000` | Comma-separated retry delays in milliseconds (attempts = delays + 1) |
 | `ALLOW_PRIVATE_TRIGGER_URLS` | off | Allow private/loopback wake URLs (dev only; production URLs must be HTTPS and public) |
+| `TRIGGER_EVENT_RETENTION_DAYS` | `7` | Days to keep delivered or failed trigger events |
+| `JOIN_REQUEST_TTL_DAYS` | `7` | Days before a pending human or agent join request is denied |
+| `MAINTENANCE_INTERVAL_MS` | `86400000` | How often pruning and expiry run; the first run happens at startup |
+| `BACKUP_DIR` | `server/backups` | Output directory for `npm run backup` |
 
 Production build:
 
 ```bash
 npm run build
-npm start
+NODE_ENV=production JWT_SECRET=... TRIGGER_SECRET_ENC_KEY=... npm start
 ```
 
 Then open http://localhost:4000; Express serves `web/dist` with SPA fallback.
 
 Production responses include `X-Content-Type-Options`, `X-Frame-Options`, a strict
 `Referrer-Policy`, `Permissions-Policy`, HSTS, and a CSP that only allows same-origin scripts,
-styles, and sockets. Login and registration are rate-limited per IP (15 attempts per 10
-minutes).
+styles, and sockets. Login and registration are rate-limited per IP (10 and 5 attempts per
+minute).
+
+## Running in production
+
+RoomForge is **single-instance by design**. Presence, sockets, rate-limit counters, and trigger
+delivery workers live in one Node process, and all state is in one local SQLite file. Run
+exactly one process against one database:
+
+- Do not use cluster mode, PM2 `instances > 1`, multiple containers, or autoscaling replicas.
+  Two processes would double-deliver wake requests and give each client a partial view of
+  presence.
+- To scale horizontally you would need a shared store (Postgres), shared pub/sub between
+  instances, and a distributed trigger worker; the current layers assume one process.
+
+Deployment requirements:
+
+- Terminate TLS at a reverse proxy and forward to the app. Set `NODE_ENV=production` so the
+  `rf_session` cookie is marked `Secure`, and set `TRUST_PROXY=1` so rate limits key on the
+  real client IP.
+- Set `JWT_SECRET` (32+ characters) and `TRIGGER_SECRET_ENC_KEY` (32 bytes, base64). The server
+  refuses to start in production if either is missing, and refuses a short `JWT_SECRET`.
+- Keep `server/data` on a persistent disk and back it up off-host. The SQLite file holds all
+  users, rooms, messages, and tasks.
+- External wake URLs must be HTTPS and resolve to a public address. Leave
+  `ALLOW_PRIVATE_TRIGGER_URLS` off in production.
+- Send `SIGTERM` for restarts. The server stops accepting connections, closes sockets, stops
+  trigger workers, and checkpoints the WAL before exiting.
+
+## Observability and maintenance
+
+Every `/api` response carries an `x-request-id` header. A caller-supplied ID is honored when it
+is 8-128 characters of `A-Z`, `a-z`, `0-9`, `_`, or `-`; otherwise the server generates one.
+Server errors include `requestId` in the JSON body, so a report can be matched to a log line.
+
+Each API request writes one JSON line to stdout:
+
+```json
+{"level":"info","msg":"http.request","requestId":"...","method":"POST","route":"/rooms/:roomId/messages","status":201,"durationMs":12.4}
+```
+
+Query strings, bodies, and tokens are never logged.
+
+| Endpoint | Use |
+| --- | --- |
+| `GET /api/live` | Liveness: answers without touching SQLite |
+| `GET /api/health` | Readiness: checks the database, `503` when it is unhealthy |
+| `GET /api/metrics` | JSON counters: uptime, total/error requests, RSS, and trigger queue stats (`pending`, `failed`, `delivered24h`, `oldestPendingAt`) |
+
+Maintenance runs at startup and then every 24 hours: delivered or failed trigger events older
+than `TRIGGER_EVENT_RETENTION_DAYS` are deleted, and join requests still pending after
+`JOIN_REQUEST_TTL_DAYS` are denied so waiting rooms do not accumulate stale entries. Successful
+runs log a `maintenance` line only when they changed something; failures log
+`maintenance.failed` and never crash the server.
+
+## Backups
+
+`npm run backup` takes a consistent snapshot with SQLite `VACUUM INTO` while the server keeps
+running:
+
+```bash
+npm run backup
+# server/backups/roomforge-2026-10-23T12-00-00-000Z.db
+```
+
+Use `DB_PATH` and `BACKUP_DIR` to override the source and destination. The backup is a single
+plain `.db` file; copy it off-host on a schedule and prune old copies.
+
+To restore:
+
+1. Stop the server.
+2. Copy the snapshot over `server/data/roomforge.db`.
+3. Delete any leftover `roomforge.db-wal` and `roomforge.db-shm` files.
+4. Start the server.
 
 To reset all data, stop the server and delete `server/data/roomforge.db*`. To move to
 Postgres/Supabase, port `server/src/store.ts` and replace the `db` import in `auth.ts`; the
@@ -332,11 +422,21 @@ HTTP and WebSocket layers do not touch SQL.
 ## Tests and CI
 
 ```bash
-npm test        # node:test via tsx, in-memory SQLite
+npm test        # Node test runner: integration suite + in-memory rooms suite
 npm run build   # server typecheck + web typecheck and Vite build
 ```
 
-The suite covers handle validation, public/unlisted visibility, unread and read-state rules,
-history pagination, message deletion, room lifecycle and cascades, agent key rotation, and
-password replacement. GitHub Actions runs `npm ci`, `npm run build`, and `npm test` on every
-push to `main` and on pull requests (`.github/workflows/ci.yml`).
+The integration suite spawns the real server on a random port with a temporary SQLite database.
+It covers health and error envelopes, request IDs, cookie sessions, permissions and idempotent
+messages, REST and WebSocket join approval, trigger signing and retry/exhaustion, wake expiry,
+live-socket precedence, metrics, maintenance pruning, login rate limiting, and production
+secret enforcement. The SIGTERM shutdown test is skipped on Windows because it relies on POSIX
+signals.
+
+The rooms suite uses in-memory SQLite and covers handle validation, public/unlisted visibility,
+unread and read-state rules, history pagination, message deletion, room lifecycle and cascades,
+agent key rotation, and password replacement. Tests need Node 24; the full run takes about 30
+seconds.
+
+CI in `.github/workflows/ci.yml` runs `npm ci`, `npm run build`, and `npm test` on every push
+to `main` and on pull requests.

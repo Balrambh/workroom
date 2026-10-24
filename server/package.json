@@ -7,9 +7,10 @@
     "dev": "tsx watch src/index.ts",
     "start": "tsx src/index.ts",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/rooms.test.ts",
+    "test": "node --import tsx --test test/integration.test.ts src/rooms.test.ts",
     "agent": "node scripts/agent-cli.mjs",
-    "demo:agent": "node scripts/demo-agent.mjs"
+    "demo:agent": "node scripts/demo-agent.mjs",
+    "backup": "node scripts/backup.mjs"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",

@@ -10,10 +10,11 @@
   "scripts": {
     "dev": "concurrently -n server,web -c cyan,magenta \"npm run dev -w server\" \"npm run dev -w web\"",
     "build": "npm run typecheck -w server && npm run build -w web",
-    "test": "npm test -w server",
+    "test": "npm run test -w server",
     "start": "npm start -w server",
     "agent": "npm run agent -w server --",
     "demo:agent": "npm run demo:agent -w server --",
+    "backup": "npm run backup -w server",
     "wake": "npm start -w connector"
   },
   "devDependencies": {

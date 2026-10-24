@@ -3,11 +3,13 @@ import { Router } from 'express';
 import type { NextFunction, Request, Response } from 'express';
 import { z } from 'zod';
 import {
+  clearSessionCookie,
   hashAgentToken,
   hashPassword,
   newAgentToken,
   requireAuth,
   resolveToken,
+  setSessionCookie,
   signSessionToken,
   verifyPassword,
 } from './auth.js';
@@ -39,23 +41,18 @@ function checkJoinRate(ip: string, code: string): void {
 }
 
 const authAttempts = new Map<string, number[]>();
-const AUTH_WINDOW_MS = 10 * 60_000;
-const AUTH_ATTEMPTS_PER_WINDOW = 15;
-
-function authIp(req: Request): string {
-  return req.ip ?? req.socket.remoteAddress ?? 'unknown';
-}
-
-function checkAuthRate(req: Request, action: string): string {
-  const key = `${action}:${authIp(req)}`;
+function checkAuthRate(ip: string, action: 'login' | 'register', limit: number): void {
+  const key = `${action}:${ip}`;
   const now = Date.now();
-  const recent = (authAttempts.get(key) ?? []).filter((at) => now - at < AUTH_WINDOW_MS);
-  if (recent.length >= AUTH_ATTEMPTS_PER_WINDOW) {
-    throw new HttpError(429, 'Too many account attempts from this address. Try again later.');
-  }
+  const recent = (authAttempts.get(key) ?? []).filter((at) => now - at < 60_000);
+  if (recent.length >= limit) throw new HttpError(429, 'Too many attempts. Try again in a minute.');
   recent.push(now);
   authAttempts.set(key, recent);
-  return key;
+  if (authAttempts.size > 5_000) {
+    for (const [candidate, times] of authAttempts) {
+      if (!times.some((at) => now - at < 60_000)) authAttempts.delete(candidate);
+    }
+  }
 }
 
 /* Admin endpoints can target any agent in a room they administer; an agent
@@ -246,13 +243,14 @@ const registerSchema = z.object({
 });
 
 router.post('/auth/register', (req, res) => {
-  checkAuthRate(req, 'register');
+  checkAuthRate(req.ip ?? req.socket.remoteAddress ?? 'unknown', 'register', 5);
   const body = registerSchema.parse(req.body);
   if (store.findUserByEmail(body.email)) {
     throw new HttpError(409, 'An account with that email already exists');
   }
   const user = store.createUser(body.name, body.email, hashPassword(body.password));
   const token = signSessionToken(user.id);
+  setSessionCookie(res, token);
   res.status(201).json({
     token,
     user: { id: user.id, name: user.name, email: user.email, handle: user.handle ?? '' },
@@ -260,7 +258,7 @@ router.post('/auth/register', (req, res) => {
 });
 
 router.post('/auth/login', (req, res) => {
-  const attemptKey = checkAuthRate(req, 'login');
+  checkAuthRate(req.ip ?? req.socket.remoteAddress ?? 'unknown', 'login', 10);
   const body = z
     .object({ email: z.string().trim().email(), password: z.string().min(1) })
     .parse(req.body);
@@ -268,11 +266,17 @@ router.post('/auth/login', (req, res) => {
   if (!user || !verifyPassword(body.password, user.password_hash)) {
     throw new HttpError(401, 'Invalid email or password');
   }
-  authAttempts.delete(attemptKey);
+  const token = signSessionToken(user.id);
+  setSessionCookie(res, token);
   res.json({
-    token: signSessionToken(user.id),
+    token,
     user: { id: user.id, name: user.name, email: user.email, handle: user.handle ?? '' },
   });
+});
+
+router.post('/auth/logout', (_req, res) => {
+  clearSessionCookie(res);
+  res.status(204).end();
 });
 
 /* One public link that gives an agent everything it needs. The token is the path
