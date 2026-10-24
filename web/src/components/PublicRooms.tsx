@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { api } from '../lib/api';
 import { usePageMeta } from '../lib/meta';
 import type { PublicRoom, RoomMode } from '../lib/types';
+import { Avatar } from './Avatar';
 import { LinkifyText } from './LinkifyText';
 import { SitePage } from './SitePage';
 import {
@@ -222,6 +223,8 @@ export function PublicRoomsPage() {
             {filteredRooms.map((room) => {
               const isCodeMode = room.mode === 'code';
               const roomUrl = `/room/${room.code}`;
+              const previews = room.memberPreviews ?? [];
+              const hiddenMembers = Math.max(room.memberCount - previews.length, 0);
               return (
                 <div
                   key={room.code}
@@ -264,7 +267,25 @@ export function PublicRoomsPage() {
 
                   <div className="directory-card-foot">
                     <div className="directory-card-members">
-                      <UsersIcon size={13} />
+                      {previews.length > 0 ? (
+                        <div className="directory-avatar-stack" aria-hidden="true">
+                          {previews.map((member, index) => (
+                            <Avatar
+                              key={`${member.type}-${member.name}-${index}`}
+                              name={member.name}
+                              type={member.type}
+                              avatar={member.avatar}
+                              iconSize={11}
+                              className="avatar-sm"
+                            />
+                          ))}
+                          {hiddenMembers > 0 ? (
+                            <span className="directory-avatar-more">+{hiddenMembers}</span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <UsersIcon size={13} />
+                      )}
                       <span>
                         {room.memberCount} {room.memberCount === 1 ? 'member' : 'members'}
                       </span>

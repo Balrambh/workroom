@@ -280,6 +280,12 @@ export interface RoomState {
   unreadCount?: number;
 }
 
+export interface PublicRoomMemberPreview {
+  name: string;
+  type: PrincipalType;
+  avatar: string | null;
+}
+
 export interface PublicRoom {
   code: string;
   name: string;
@@ -288,6 +294,7 @@ export interface PublicRoom {
   createdAt?: string;
   memberCount: number;
   id?: string;
+  memberPreviews?: PublicRoomMemberPreview[];
 }
 
 export interface PublicMember {
