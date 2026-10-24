@@ -550,6 +550,23 @@ test('profile pictures are assigned automatically and can be changed', async () 
   assert.equal(rejectedAgent.status, 400);
 });
 
+test('public room directory exposes member avatar previews', async () => {
+  await createAgent({ name: 'DirectoryBotOne', role: 'viewer' });
+  await createAgent({ name: 'DirectoryBotTwo', role: 'viewer' });
+
+  const listed = await api(server.base, '/rooms/public');
+  assert.equal(listed.status, 200);
+  const room = listed.body.rooms.find((entry: any) => entry.code === roomCode);
+  assert.ok(room, 'the public room is listed');
+  assert.ok(room.memberCount >= 5);
+  assert.equal(room.memberPreviews.length, 4);
+  for (const preview of room.memberPreviews) {
+    assert.ok(typeof preview.name === 'string' && preview.name.length > 0);
+    assert.ok(preview.type === 'user' || preview.type === 'agent');
+    assert.match(String(preview.avatar), AVATAR_PATTERN);
+  }
+});
+
 test('agent join over REST polling and admin approval', async () => {
   const join = await api(server.base, `/agent/join/${roomCode}`, {
     method: 'POST',

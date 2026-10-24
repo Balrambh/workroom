@@ -320,7 +320,12 @@ router.get('/agent/connect/:token', (req, res) => {
 /* Public rooms directory: returns all public rooms */
 router.get(['/rooms/public', '/room', '/rooms/all'], (req, res) => {
   previewHeaders(res);
-  const rooms = store.listPublicRooms();
+  const rooms = store.listPublicRooms().map((room) => ({
+    ...room,
+    memberPreviews: publicMembers(room.id)
+      .slice(0, 4)
+      .map((member) => ({ name: member.name, type: member.type, avatar: member.avatar })),
+  }));
   res.json({ rooms });
 });
 

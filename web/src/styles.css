@@ -5237,8 +5237,39 @@ mark.search-hit {
 .directory-card-members {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
   color: var(--muted);
+  min-width: 0;
+}
+
+.directory-avatar-stack {
+  display: flex;
+  align-items: center;
+  flex: none;
+}
+
+.directory-avatar-stack > * + * {
+  margin-left: -7px;
+}
+
+.directory-avatar-stack .avatar {
+  border-width: 2px;
+  border-color: var(--panel);
+}
+
+.directory-avatar-more {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  flex: none;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  background: #16222f;
+  color: var(--muted);
+  font-size: 9.5px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 
 .directory-enter-btn {
