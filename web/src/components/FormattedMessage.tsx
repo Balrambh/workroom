@@ -1,11 +1,20 @@
 import { useState } from 'react';
 import type { ReactNode } from 'react';
+import type { PrincipalType } from '../lib/types';
 import { CheckIcon, CopyIcon } from './Icons';
+
+export interface MentionTarget {
+  name: string;
+  type: PrincipalType;
+  id: string;
+}
 
 interface FormattedMessageProps {
   content: string;
   meName: string;
   onCopy?: (text: string, label: string) => void;
+  mentionTargets?: MentionTarget[];
+  onMentionClick?: (type: PrincipalType, id: string) => void;
 }
 
 function escapeRegExp(value: string): string {
@@ -54,9 +63,26 @@ function CodeBlock({
   );
 }
 
-function renderInlineText(text: string, meName: string): ReactNode[] {
-  const tokenRegex =
-    /(`[^`\n]+`)|(\*\*[^*]+?\*\*)|(https?:\/\/[^\s<]+[^<.,:;"')\]\s])|(@[\w\u00C0-\u024F-]+)|(\n)/gu;
+function renderInlineText(
+  text: string,
+  meName: string,
+  mentionTargets: MentionTarget[],
+  onMentionClick?: (type: PrincipalType, id: string) => void,
+): ReactNode[] {
+  const targetsByName = new Map<string, MentionTarget>();
+  for (const target of mentionTargets) {
+    if (target.name) targetsByName.set(target.name.toLowerCase(), target);
+  }
+  const knownNames = [...targetsByName.keys()]
+    .sort((a, b) => b.length - a.length)
+    .map(escapeRegExp);
+  const knownMention = knownNames.length
+    ? `|(?<known>@(?:${knownNames.join('|')})(?![\\p{L}\\p{N}_]))`
+    : '';
+  const tokenRegex = new RegExp(
+    `(?<code>\`[^\`\\n]+\`)|(?<bold>\\*\\*[^*]+?\\*\\*)|(?<url>https?:\\/\\/[^\\s<]+[^<.,:;"')\\]\\s])${knownMention}|(?<mention>@[\\w\\u00C0-\\u024F-]+)|(?<newline>\\n)`,
+    'giu',
+  );
 
   const result: ReactNode[] = [];
   let lastIndex = 0;
@@ -70,44 +96,65 @@ function renderInlineText(text: string, meName: string): ReactNode[] {
       result.push(text.slice(lastIndex, match.index));
     }
 
-    const [fullMatch, code, bold, url, mention, newline] = match;
+    const groups = match.groups ?? {};
 
-    if (code) {
+    if (groups.code) {
       result.push(
         <code className="chat-inline-code" key={keyIndex++}>
-          {code.slice(1, -1)}
+          {groups.code.slice(1, -1)}
         </code>,
       );
-    } else if (bold) {
+    } else if (groups.bold) {
       result.push(
         <strong key={keyIndex++}>
-          {bold.slice(2, -2)}
+          {groups.bold.slice(2, -2)}
         </strong>,
       );
-    } else if (url) {
+    } else if (groups.url) {
       result.push(
         <a
-          href={url}
+          href={groups.url}
           target="_blank"
           rel="noopener noreferrer"
           className="chat-link"
           key={keyIndex++}
         >
-          {url}
+          {groups.url}
         </a>,
       );
-    } else if (mention) {
+    } else if (groups.known || groups.mention) {
+      const mention = groups.known ?? groups.mention ?? '';
+      const target = groups.known
+        ? targetsByName.get(mention.slice(1).toLowerCase())
+        : undefined;
       const isMe = mentionPattern ? mentionPattern.test(mention) : false;
-      result.push(
-        <mark className={`mention ${isMe ? 'mention-highlight' : ''}`} key={keyIndex++}>
-          {mention}
-        </mark>,
-      );
-    } else if (newline) {
+      const className = `mention ${isMe ? 'mention-highlight' : ''} ${
+        target && onMentionClick ? 'mention-link' : ''
+      }`;
+      if (target && onMentionClick) {
+        result.push(
+          <button
+            type="button"
+            className={className}
+            title={`Open ${target.name}'s profile`}
+            key={keyIndex++}
+            onClick={() => onMentionClick(target.type, target.id)}
+          >
+            {mention}
+          </button>,
+        );
+      } else {
+        result.push(
+          <mark className={className} key={keyIndex++}>
+            {mention}
+          </mark>,
+        );
+      }
+    } else if (groups.newline) {
       result.push(<br key={keyIndex++} />);
     }
 
-    lastIndex = match.index + fullMatch.length;
+    lastIndex = match.index + match[0].length;
   }
 
   if (lastIndex < text.length) {
@@ -117,7 +164,13 @@ function renderInlineText(text: string, meName: string): ReactNode[] {
   return result;
 }
 
-export function FormattedMessage({ content, meName, onCopy }: FormattedMessageProps) {
+export function FormattedMessage({
+  content,
+  meName,
+  onCopy,
+  mentionTargets = [],
+  onMentionClick,
+}: FormattedMessageProps) {
   const parts: ReactNode[] = [];
   const blockRegex = /```([a-zA-Z0-9_+-]*)\n?([\s\S]*?)```/g;
   let lastIndex = 0;
@@ -129,7 +182,7 @@ export function FormattedMessage({ content, meName, onCopy }: FormattedMessagePr
       const rawText = content.slice(lastIndex, blockMatch.index);
       parts.push(
         <span key={`text-${blockIdx++}`}>
-          {renderInlineText(rawText, meName)}
+          {renderInlineText(rawText, meName, mentionTargets, onMentionClick)}
         </span>,
       );
     }
@@ -152,7 +205,7 @@ export function FormattedMessage({ content, meName, onCopy }: FormattedMessagePr
     const rawText = content.slice(lastIndex);
     parts.push(
       <span key={`text-${blockIdx++}`}>
-        {renderInlineText(rawText, meName)}
+        {renderInlineText(rawText, meName, mentionTargets, onMentionClick)}
       </span>,
     );
   }

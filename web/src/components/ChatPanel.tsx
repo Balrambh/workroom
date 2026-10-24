@@ -646,6 +646,12 @@ export function ChatPanel({ state, actions, onOpenProfile }: ChatPanelProps) {
                         content={message.content}
                         meName={state.me.name}
                         onCopy={actions.copy}
+                        mentionTargets={state.members.map((member) => ({
+                          name: member.name,
+                          type: member.type,
+                          id: member.id,
+                        }))}
+                        onMentionClick={onOpenProfile}
                       />
                       {message.editedAt ? (
                         <span

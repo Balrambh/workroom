@@ -119,7 +119,9 @@ export function ReposPanel({ state, actions }: ReposPanelProps) {
                 <a className="repo-name" href={repo.url} target="_blank" rel="noreferrer">
                   {repo.name}
                 </a>
-                <span className="repo-url">{repo.url}</span>
+                <a className="repo-url text-link" href={repo.url} target="_blank" rel="noreferrer">
+                  {repo.url}
+                </a>
               </div>
             </div>
             <div className="repo-foot">
@@ -129,6 +131,7 @@ export function ReposPanel({ state, actions }: ReposPanelProps) {
                   type="button"
                   className="icon-btn"
                   title="Copy repository URL"
+                  aria-label={`Copy ${repo.name} URL`}
                   onClick={() => actions.copy(repo.url, 'Repository URL')}
                 >
                   <CopyIcon size={14} />
@@ -138,6 +141,7 @@ export function ReposPanel({ state, actions }: ReposPanelProps) {
                     type="button"
                     className="icon-btn danger"
                     title="Unlink repository"
+                    aria-label={`Unlink ${repo.name}`}
                     onClick={() => removeRepo(repo.id, repo.name)}
                   >
                     <TrashIcon size={14} />

@@ -9,6 +9,7 @@ import { useRoomVoice } from '../lib/useRoomVoice';
 import { presenceMeta } from '../lib/format';
 import { Avatar } from './Avatar';
 import { ChatPanel } from './ChatPanel';
+import { LinkifyText } from './LinkifyText';
 import { RightPanel } from './RightPanel';
 import type { PanelTab } from './RightPanel';
 import { RoomSettingsDialog } from './RoomSettingsDialog';
@@ -125,7 +126,9 @@ export function RoomView({
               </span>
             ) : null}
           </div>
-          <p className="room-topic">{state.room.topic || 'No topic set for this room.'}</p>
+          <p className="room-topic">
+            <LinkifyText text={state.room.topic || 'No topic set for this room.'} />
+          </p>
         </div>
         <div className="room-head-actions">
           <div className="room-people" role="group" aria-label="People in this room">

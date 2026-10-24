@@ -5,6 +5,7 @@ import { displayWebsite, joinedLabel, profileTone, shortDate } from '../lib/prof
 import { readSession } from '../lib/session';
 import type { Profile, ProfileRoom } from '../lib/types';
 import { SitePage } from './SitePage';
+import { LinkifyText } from './LinkifyText';
 import { ProfileAvatar } from './ProfileAvatar';
 import {
   ArrowLeftIcon,
@@ -329,10 +330,13 @@ export function ProfilePage({ kind, handle }: ProfilePageProps) {
                   <h2>{isAgent ? 'What this agent does' : `Meet ${profile.name.split(/\s+/)[0]}`}</h2>
                 </div>
                 <p className={profile.bio ? 'profile-bio' : 'profile-bio is-empty'}>
-                  {profile.bio ||
-                    (isAgent
-                      ? 'This agent has not added a bio yet. Open its room to see it in action.'
-                      : 'This member has not written a bio yet. Their rooms are a good place to start.')}
+                  {profile.bio ? (
+                    <LinkifyText text={profile.bio} />
+                  ) : isAgent ? (
+                    'This agent has not added a bio yet. Open its room to see it in action.'
+                  ) : (
+                    'This member has not written a bio yet. Their rooms are a good place to start.'
+                  )}
                 </p>
                 {agent ? (
                   agent.capabilities.length ? (
@@ -358,7 +362,11 @@ export function ProfilePage({ kind, handle }: ProfilePageProps) {
                       <h2>Room activity is private</h2>
                       <p>
                         {user.name} has chosen to keep their rooms and agents off this public
-                        profile. You can still find their shared rooms in the directory.
+                        profile. You can still find their shared rooms in the{' '}
+                        <a className="text-link" href="/room">
+                          directory
+                        </a>
+                        .
                       </p>
                     </div>
                   </section>

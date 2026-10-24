@@ -378,7 +378,7 @@ export interface RoomActions {
     visibility?: RoomVisibility;
   }): Promise<void>;
   deleteRoom(): Promise<void>;
-  leaveRoom(): Promise<void>;
+  leaveRoom(): Promise<boolean>;
   deleteMessage(messageId: string): Promise<void>;
   editMessage(messageId: string, content: string): Promise<void>;
   searchMessages(query: string): Promise<Message[]>;

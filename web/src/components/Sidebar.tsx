@@ -8,6 +8,7 @@ import type {
   WorkspaceTab,
 } from '../lib/types';
 import { Avatar } from './Avatar';
+import { LinkifyText } from './LinkifyText';
 import {
   ActivityIcon,
   ArrowLeftIcon,
@@ -123,7 +124,7 @@ export function Sidebar({
               </div>
               <h2 className="sidebar-room-name">{activeRoom.name}</h2>
               <p className="sidebar-room-topic">
-                {activeRoom.topic || 'No topic set for this room yet.'}
+                <LinkifyText text={activeRoom.topic || 'No topic set for this room yet.'} />
               </p>
               <div className="sidebar-room-meta">
                 <span>

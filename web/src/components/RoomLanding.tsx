@@ -14,6 +14,7 @@ import {
   UsersIcon,
 } from './Icons';
 import { Avatar } from './Avatar';
+import { LinkifyText } from './LinkifyText';
 import App from '../App';
 
 interface RoomLandingProps {
@@ -254,7 +255,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
               </span>
               <h1>{preview.room.name}</h1>
               <p className="landing-topic">
-                {preview.room.topic || 'No topic set for this room.'}
+                <LinkifyText text={preview.room.topic || 'No topic set for this room.'} />
               </p>
               <div className="landing-meta">
                 <span className={`mode-badge mode-${preview.room.mode}`}>
@@ -325,6 +326,7 @@ export function RoomLanding({ code }: RoomLandingProps) {
                   type="button"
                   className="icon-btn"
                   title="Copy agent join link"
+                  aria-label="Copy agent join link"
                   onClick={() => copy(agentCommand, 'agent')}
                 >
                   {copied === 'agent' ? <CheckIcon size={13} /> : <CopyIcon size={13} />}

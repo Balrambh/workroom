@@ -47,14 +47,12 @@ export function RoomSettingsDialog({ state, actions, onClose }: RoomSettingsDial
   }
 
   async function leaveRoom() {
-    if (!window.confirm(`Leave “${state.room.name}”? You will need a new invite or approval to rejoin.`)) {
-      return;
-    }
     setBusy('leave');
     setError(null);
     try {
-      await actions.leaveRoom();
-      onClose();
+      const left = await actions.leaveRoom();
+      if (left) onClose();
+      else setBusy(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not leave the room');
       setBusy(null);
@@ -163,7 +161,9 @@ export function RoomSettingsDialog({ state, actions, onClose }: RoomSettingsDial
           <div className="settings-share">
             <span className="section-label">Invite link</span>
             <div className="settings-share-row">
-              <code>{roomUrl}</code>
+              <a className="share-link" href={roomUrl} target="_blank" rel="noreferrer">
+                <code>{roomUrl}</code>
+              </a>
               <button
                 type="button"
                 className="btn btn-ghost btn-small"

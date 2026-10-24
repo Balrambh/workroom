@@ -844,23 +844,23 @@ export default function App({ initialCode }: AppProps = {}) {
       showNotice('Room deleted');
     },
 
-    async leaveRoom() {
+    async leaveRoom(): Promise<boolean> {
       const roomId = activeIdRef.current;
       const current = roomStateRef.current;
-      if (!roomId) return;
+      if (!roomId) return false;
       const name = current?.room.name ?? 'this room';
       if (
         !window.confirm(
           `Leave “${name}”?\n\nYou will return to the room's public page and can request access again later.`,
         )
       ) {
-        return;
+        return false;
       }
       try {
         await api.leaveRoom(roomId);
       } catch (error) {
         showNotice(error instanceof Error ? error.message : 'Could not leave the room');
-        return;
+        return false;
       }
       const code = current?.room.code;
       setRooms((prev) => prev.filter((room) => room.id !== roomId));
@@ -868,6 +868,7 @@ export default function App({ initialCode }: AppProps = {}) {
       setActiveId(null);
       setMemberProfile(null);
       window.location.assign(code ? `/room/${code}` : '/room');
+      return true;
     },
 
     async deleteMessage(messageId: string) {

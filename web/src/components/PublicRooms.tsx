@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { api } from '../lib/api';
 import { usePageMeta } from '../lib/meta';
 import type { PublicRoom, RoomMode } from '../lib/types';
+import { LinkifyText } from './LinkifyText';
 import { SitePage } from './SitePage';
 import {
   ArrowUpRightIcon,
@@ -143,6 +144,7 @@ export function PublicRoomsPage() {
                 className="btn-clear-search"
                 onClick={() => setSearch('')}
                 title="Clear search"
+                aria-label="Clear search"
               >
                 ✕
               </button>
@@ -235,6 +237,7 @@ export function PublicRoomsPage() {
                       type="button"
                       className="room-code-tag"
                       title="Click to copy code"
+                      aria-label={`Copy room code ${room.code}`}
                       onClick={(e) => copyCode(room.code, e)}
                     >
                       <span className="code-text">{room.code}</span>
@@ -253,7 +256,10 @@ export function PublicRoomsPage() {
                   </h2>
 
                   <p className="directory-card-topic">
-                    {room.topic || 'No topic description provided.'}
+                    <LinkifyText
+                      text={room.topic || 'No topic description provided.'}
+                      stopPropagation
+                    />
                   </p>
 
                   <div className="directory-card-foot">

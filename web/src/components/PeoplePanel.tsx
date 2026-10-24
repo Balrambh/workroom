@@ -14,6 +14,7 @@ import type {
 import { initial, presenceMeta, roleMeta } from '../lib/format';
 import { profilePath } from '../lib/profile';
 import { Avatar } from './Avatar';
+import { LinkifyText } from './LinkifyText';
 import { Modal } from './Modal';
 import { ProfileDialog } from './ProfileDialog';
 import {
@@ -218,18 +219,38 @@ export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps)
                   </span>
                 </div>
                 <div className="member-sub">
-                  {request.description ||
-                    (request.kind === 'agent'
-                      ? request.deliveryMode === 'trigger'
-                        ? 'Wakes when mentioned'
-                        : 'Wants a live agent connection'
-                      : 'Wants to join this room')}
+                  <LinkifyText
+                    text={
+                      request.description ||
+                      (request.kind === 'agent'
+                        ? request.deliveryMode === 'trigger'
+                          ? 'Wakes when mentioned'
+                          : 'Wants a live agent connection'
+                        : 'Wants to join this room')
+                    }
+                  />
                 </div>
                 {request.kind === 'agent' ? (
                   <div className="request-time">
-                    {request.deliveryMode === 'trigger'
-                      ? `Trigger mode · ${request.triggerUrl ?? 'no URL'}`
-                      : 'Socket mode · holds a live connection'}
+                    {request.deliveryMode === 'trigger' ? (
+                      <>
+                        Trigger mode ·{' '}
+                        {request.triggerUrl ? (
+                          <a
+                            className="text-link"
+                            href={request.triggerUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            {request.triggerUrl}
+                          </a>
+                        ) : (
+                          'no URL'
+                        )}
+                      </>
+                    ) : (
+                      'Socket mode · holds a live connection'
+                    )}
                   </div>
                 ) : null}
                 <div className="request-time">
@@ -251,6 +272,7 @@ export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps)
                   type="button"
                   className="icon-btn danger"
                   title={`Decline ${request.name}`}
+                  aria-label={`Decline ${request.name}`}
                   disabled={deciding === request.id}
                   onClick={() => decide(request, false)}
                 >
@@ -272,7 +294,9 @@ export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps)
             Share this link. Anyone can preview the room; {isAdmin ? 'you approve' : 'an admin approves'} who joins.
           </p>
           <div className="invite-link-row">
-            <code>{roomUrl}</code>
+            <a className="share-link" href={roomUrl} target="_blank" rel="noreferrer">
+              <code>{roomUrl}</code>
+            </a>
             <button
               type="button"
               className="btn btn-ghost btn-small"
@@ -288,6 +312,7 @@ export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps)
               type="button"
               className="icon-btn"
               title="Copy full room ID (for agent scripts)"
+              aria-label="Copy full room ID"
               onClick={() => actions.copy(state.room.id, 'Room ID')}
             >
               <CopyIcon size={13} />
@@ -362,8 +387,14 @@ export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps)
                     {member.type === 'agent' ? <span className="tag tag-gray">{mode}</span> : null}
                   </div>
                   <div className="member-sub">
-                    {member.description ||
-                      (member.type === 'agent' ? 'Connected over the agent API' : `Joined as ${member.role}`)}
+                    <LinkifyText
+                      text={
+                        member.description ||
+                        (member.type === 'agent'
+                          ? 'Connected over the agent API'
+                          : `Joined as ${member.role}`)
+                      }
+                    />
                     {meta ? ` · ${meta.label}` : ''}
                   </div>
                 </div>
@@ -383,6 +414,7 @@ export function PeoplePanel({ state, actions, onOpenProfile }: PeoplePanelProps)
                       type="button"
                       className="icon-btn danger"
                       title={`Remove ${member.name}`}
+                      aria-label={`Remove ${member.name}`}
                       onClick={() => remove(member)}
                     >
                       <TrashIcon size={14} />

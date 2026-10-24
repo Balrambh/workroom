@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import type { PrincipalType, RoomActions, RoomState, Task, TaskStatus } from '../lib/types';
 import { parsePaths, taskMeta, timeAgo } from '../lib/format';
 import { Avatar } from './Avatar';
+import { LinkifyText } from './LinkifyText';
 import { BranchIcon, PlusIcon, SearchIcon, TrashIcon, XIcon } from './Icons';
 
 interface TasksPanelProps {
@@ -312,6 +313,9 @@ export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
                 const canClaim = !task.assigneeId && !isViewer && !canManage;
                 const meta = taskMeta[task.status];
                 const paths = parsePaths(task.paths);
+                const repo = task.repoId
+                  ? state.repos.find((entry) => entry.id === task.repoId)
+                  : undefined;
                 const assigneeMember = state.members.find(
                   (member) => member.type === task.assigneeType && member.id === task.assigneeId,
                 );
@@ -334,10 +338,23 @@ export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
                     </div>
                     <div className="task-meta">
                       {task.repoName ? (
-                        <span className="chip">
-                          <BranchIcon size={11} />
-                          {task.repoName}{task.branch ? ` @ ${task.branch}` : ''}
-                        </span>
+                        repo?.url ? (
+                          <a
+                            className="chip chip-link"
+                            href={repo.url}
+                            target="_blank"
+                            rel="noreferrer"
+                            title={`Open ${task.repoName}`}
+                          >
+                            <BranchIcon size={11} />
+                            {task.repoName}{task.branch ? ` @ ${task.branch}` : ''}
+                          </a>
+                        ) : (
+                          <span className="chip">
+                            <BranchIcon size={11} />
+                            {task.repoName}{task.branch ? ` @ ${task.branch}` : ''}
+                          </span>
+                        )
                       ) : task.branch ? (
                         <span className="chip">{task.branch}</span>
                       ) : null}
@@ -351,7 +368,11 @@ export function TasksPanel({ state, actions, onOpenProfile }: TasksPanelProps) {
                       </button>
                       <span>{timeAgo(task.updatedAt)}</span>
                     </div>
-                    {task.description ? <p className="task-desc">{task.description}</p> : null}
+                    {task.description ? (
+                      <p className="task-desc">
+                        <LinkifyText text={task.description} />
+                      </p>
+                    ) : null}
                     {paths.length > 0 ? (
                       <div className="path-chips">
                         {paths.map((path) => (

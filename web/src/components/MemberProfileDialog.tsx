@@ -4,6 +4,7 @@ import { presenceMeta, roleMeta } from '../lib/format';
 import { profilePath, shortDate } from '../lib/profile';
 import type { Member, PresenceEntry, Profile } from '../lib/types';
 import { Modal } from './Modal';
+import { LinkifyText } from './LinkifyText';
 import { ProfileAvatar } from './ProfileAvatar';
 import {
   ArrowUpRightIcon,
@@ -139,10 +140,13 @@ export function MemberProfileDialog({
         ) : (
           <>
             <p className={`member-profile-bio ${bio ? '' : 'muted'}`}>
-              {bio ||
-                (isMe
-                  ? 'Add a bio so people know what you work on. Edit your profile to get started.'
-                  : `${member.name} has not written a bio yet.`)}
+              {bio ? (
+                <LinkifyText text={bio} />
+              ) : isMe ? (
+                'Add a bio so people know what you work on. Edit your profile to get started.'
+              ) : (
+                `${member.name} has not written a bio yet.`
+              )}
             </p>
 
             <div className="member-profile-facts">
