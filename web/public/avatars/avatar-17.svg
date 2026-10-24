@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96" width="96" height="96" role="img">
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7DD3FC"/><stop offset="1" stop-color="#0369A1"/></linearGradient>
+<radialGradient id="glow" cx="0.22" cy="0.12" r="0.95"><stop offset="0" stop-color="#fff" stop-opacity=".24"/><stop offset="1" stop-color="#fff" stop-opacity="0"/></radialGradient>
+</defs>
+<rect width="96" height="96" fill="url(#bg)"/>
+<rect width="96" height="96" fill="url(#glow)"/>
+<path d="M84 10.4Q84.576 13.424 87.6 14Q84.576 14.576 84 17.6Q83.424 14.576 80.4 14Q83.424 13.424 84 10.4Z" fill="#fff" opacity="0.4"/><path d="M12 19.6Q12.384 21.616 14.4 22Q12.384 22.384 12 24.4Q11.616 22.384 9.6 22Q11.616 21.616 12 19.6Z" fill="#FBCFE8" opacity="0.55"/><path d="M80 77.4Q80.416 79.584 82.6 80Q80.416 80.416 80 82.6Q79.584 80.416 77.4 80Q79.584 79.584 80 77.4Z" fill="#fff" opacity="0.3"/>
+
+      <rect x="33" y="10" width="11" height="33" rx="5.5" fill="#FFF8ED" transform="rotate(-8 38.5 26.5)"/>
+      <rect x="52" y="10" width="11" height="33" rx="5.5" fill="#FFF8ED" transform="rotate(8 57.5 26.5)"/>
+      <rect x="36.5" y="15" width="4.5" height="22" rx="2.25" fill="#FBCFE8" transform="rotate(-8 38.5 26.5)"/>
+      <rect x="55" y="15" width="4.5" height="22" rx="2.25" fill="#FBCFE8" transform="rotate(8 57.5 26.5)"/>
+      <circle cx="48" cy="57" r="21" fill="#FFF8ED"/>
+      <circle cx="39" cy="54" r="3.2" fill="#1B2436"/><circle cx="57" cy="54" r="3.2" fill="#1B2436"/>
+      <path d="M45 59h6l-3 2.5z" fill="#1B2436"/>
+      <rect x="44.5" y="63" width="7" height="5" rx="1.6" fill="#FFF8ED" stroke="#1B2436" stroke-width="1.6"/>
+      <path d="M48 63v5" stroke="#1B2436" stroke-width="1.2"/>
+      <circle cx="31" cy="60" r="4" fill="#FDA4AF" opacity=".85"/><circle cx="65" cy="60" r="4" fill="#FDA4AF" opacity=".85"/>
+</svg>

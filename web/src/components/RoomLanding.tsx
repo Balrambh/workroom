@@ -5,7 +5,6 @@ import { clearSession, readSession } from '../lib/session';
 import type { JoinState, RoomPreview, Session } from '../lib/types';
 import {
   ArrowUpRightIcon,
-  BotIcon,
   BranchIcon,
   CheckIcon,
   CopyIcon,
@@ -14,19 +13,11 @@ import {
   TerminalIcon,
   UsersIcon,
 } from './Icons';
+import { Avatar } from './Avatar';
 import App from '../App';
 
 interface RoomLandingProps {
   code: string;
-}
-
-function initials(name: string): string {
-  return name
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('');
 }
 
 function LandingFooter() {
@@ -285,9 +276,12 @@ export function RoomLanding({ code }: RoomLandingProps) {
                   const href = profilePath(member.type, member.handle);
                   const card = (
                     <>
-                      <span className={`avatar ${member.type === 'agent' ? 'avatar-agent' : ''}`}>
-                        {member.type === 'agent' ? <BotIcon size={15} /> : initials(member.name)}
-                      </span>
+                      <Avatar
+                        name={member.name}
+                        type={member.type}
+                        avatar={member.avatar}
+                        iconSize={15}
+                      />
                       <div>
                         <strong>{member.name}</strong>
                         <span>

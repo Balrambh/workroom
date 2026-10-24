@@ -74,7 +74,7 @@ export const api = {
   },
 
   me(): Promise<{
-    principal: { type: string; id: string; name: string; email?: string; handle?: string };
+    principal: { type: string; id: string; name: string; email?: string; handle?: string; avatar?: string };
   }> {
     return request('/me');
   },
@@ -173,6 +173,29 @@ export const api = {
 
   sendMessage(roomId: string, content: string, kind: MessageKind): Promise<Message> {
     return request(`/rooms/${roomId}/messages`, { method: 'POST', body: { content, kind } });
+  },
+
+  searchMessages(roomId: string, query: string): Promise<{ messages: Message[] }> {
+    const params = new URLSearchParams({ q: query, limit: '30' });
+    return request(`/rooms/${roomId}/messages/search?${params.toString()}`);
+  },
+
+  messagesAround(
+    roomId: string,
+    seq: number,
+    limit = 30,
+  ): Promise<{ older: Message[]; newer: Message[] }> {
+    return Promise.all([
+      request<{ messages: Message[] }>(`/rooms/${roomId}/messages?before_seq=${seq}&limit=${limit}`),
+      request<{ messages: Message[] }>(`/rooms/${roomId}/messages?after_seq=${seq}&limit=${limit}`),
+    ]).then(([before, after]) => ({ older: before.messages, newer: after.messages }));
+  },
+
+  editMessage(roomId: string, messageId: string, content: string): Promise<Message> {
+    return request(`/rooms/${roomId}/messages/${messageId}`, {
+      method: 'PATCH',
+      body: { content },
+    });
   },
 
   deleteMessage(roomId: string, messageId: string): Promise<{ ok: boolean }> {

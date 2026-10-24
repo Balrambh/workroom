@@ -44,10 +44,18 @@ export function resolveToken(token: string): Principal | null {
 
   if (token.startsWith(AGENT_PREFIX)) {
     const row = db
-      .prepare('SELECT id, name, handle FROM agents WHERE token_hash = ?')
-      .get(hashAgentToken(token)) as { id: string; name: string; handle: string | null } | undefined;
+      .prepare('SELECT id, name, handle, avatar FROM agents WHERE token_hash = ?')
+      .get(hashAgentToken(token)) as
+      | { id: string; name: string; handle: string | null; avatar: string | null }
+      | undefined;
     return row
-      ? { type: 'agent', id: row.id, name: row.name, ...(row.handle ? { handle: row.handle } : {}) }
+      ? {
+          type: 'agent',
+          id: row.id,
+          name: row.name,
+          ...(row.handle ? { handle: row.handle } : {}),
+          ...(row.avatar ? { avatar: row.avatar } : {}),
+        }
       : null;
   }
 
@@ -55,9 +63,9 @@ export function resolveToken(token: string): Principal | null {
     const payload = jwt.verify(token, SECRET) as { sub?: string };
     if (!payload.sub) return null;
     const user = db
-      .prepare('SELECT id, name, email, handle FROM users WHERE id = ?')
+      .prepare('SELECT id, name, email, handle, avatar FROM users WHERE id = ?')
       .get(payload.sub) as
-      | { id: string; name: string; email: string; handle: string | null }
+      | { id: string; name: string; email: string; handle: string | null; avatar: string | null }
       | undefined;
     return user
       ? {
@@ -66,6 +74,7 @@ export function resolveToken(token: string): Principal | null {
           name: user.name,
           email: user.email,
           ...(user.handle ? { handle: user.handle } : {}),
+          ...(user.avatar ? { avatar: user.avatar } : {}),
         }
       : null;
   } catch {

@@ -1,4 +1,5 @@
 import { randomBytes, randomUUID } from 'node:crypto';
+import { pickAvatar } from './avatars.js';
 import { db } from './db.js';
 import { handleFromName } from './handles.js';
 import type {
@@ -57,6 +58,7 @@ export interface UserRow {
   location: string;
   website: string;
   show_rooms: number;
+  avatar: string | null;
 }
 
 export function createUser(name: string, email: string, passwordHash: string): UserRow {
@@ -72,11 +74,12 @@ export function createUser(name: string, email: string, passwordHash: string): U
     location: '',
     website: '',
     show_rooms: 1,
+    avatar: pickAvatar(),
   };
   db.prepare(
-    `INSERT INTO users (id, email, name, password_hash, created_at, handle)
-     VALUES (?, ?, ?, ?, ?, ?)`,
-  ).run(user.id, user.email, user.name, user.password_hash, user.created_at, user.handle);
+    `INSERT INTO users (id, email, name, password_hash, created_at, handle, avatar)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(user.id, user.email, user.name, user.password_hash, user.created_at, user.handle, user.avatar);
   return user;
 }
 
@@ -129,8 +132,9 @@ export function updateUserProfile(
     location?: string;
     website?: string;
     showRooms?: boolean;
+    avatar?: string;
   },
-): UserRow | undefined {
+): UserProfile | undefined {
   const columns: Record<string, string> = {
     name: 'name',
     handle: 'handle',
@@ -138,13 +142,14 @@ export function updateUserProfile(
     bio: 'bio',
     location: 'location',
     website: 'website',
+    avatar: 'avatar',
   };
   const sets: string[] = [];
   const values: (string | number)[] = [];
   for (const [key, column] of Object.entries(columns)) {
-    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+    if (patch[key as keyof typeof patch] !== undefined) {
       sets.push(`${column} = ?`);
-      values.push(String((patch as Record<string, unknown>)[key] ?? ''));
+      values.push(String(patch[key as keyof typeof patch] ?? ''));
     }
   }
   if (patch.showRooms !== undefined) {
@@ -154,7 +159,7 @@ export function updateUserProfile(
   if (sets.length) {
     db.prepare(`UPDATE users SET ${sets.join(', ')} WHERE id = ?`).run(...values, userId);
   }
-  return findUserById(userId);
+  return getUserProfile(userId);
 }
 
 export function getUserPasswordHash(userId: string): string | undefined {
@@ -382,6 +387,7 @@ export function listMembers(roomId: string): Member[] {
               COALESCE(u.name, a.name, 'Unknown') AS name,
               a.description AS description,
               COALESCE(u.handle, a.handle) AS handle,
+              COALESCE(u.avatar, a.avatar) AS avatar,
               CASE WHEN rm.principal_type = 'agent'
                    THEN COALESCE(NULLIF(a.headline, ''), NULLIF(a.description, ''))
                    ELSE NULL END AS headline
@@ -402,6 +408,7 @@ export function listMembers(roomId: string): Member[] {
     description: row.description ?? null,
     handle: row.handle ?? null,
     headline: row.headline ?? null,
+    avatar: row.avatar ?? null,
   }));
 }
 
@@ -423,10 +430,11 @@ export function createAgent(
 ): Member {
   const id = randomUUID();
   const handle = allocateHandle(name, 'agent');
+  const avatar = pickAvatar();
   db.prepare(
     `INSERT INTO agents (id, room_id, name, description, role, token_hash, created_by, created_by_type,
-                         created_at, delivery_mode, trigger_url, trigger_secret_enc, handle, headline)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                         created_at, delivery_mode, trigger_url, trigger_secret_enc, handle, headline, avatar)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
     id,
     roomId,
@@ -442,8 +450,9 @@ export function createAgent(
     options.triggerSecretEnc ?? null,
     handle,
     description,
+    avatar,
   );
-  addMember(roomId, { type: 'agent', id, name }, role);
+  addMember(roomId, { type: 'agent', id, name, avatar }, role);
   return listMembers(roomId).find((member) => member.type === 'agent' && member.id === id)!;
 }
 
@@ -577,13 +586,18 @@ export function listUserProfileRooms(userId: string): ProfileRoom[] {
 function listUserCreatedAgents(userId: string): ProfileAgentLink[] {
   const rows = db
     .prepare(
-      `SELECT handle, name, COALESCE(NULLIF(headline, ''), NULLIF(description, ''), '') AS headline
+      `SELECT handle, name, avatar, COALESCE(NULLIF(headline, ''), NULLIF(description, ''), '') AS headline
        FROM agents
        WHERE created_by = ? AND created_by_type = 'user' AND handle IS NOT NULL AND handle <> ''
        ORDER BY created_at DESC`,
     )
     .all(userId) as Row[];
-  return rows.map((row) => ({ handle: row.handle, name: row.name, headline: row.headline }));
+  return rows.map((row) => ({
+    handle: row.handle,
+    name: row.name,
+    headline: row.headline,
+    avatar: row.avatar ?? null,
+  }));
 }
 
 function buildUserProfile(user: UserRow, publicView: boolean): UserProfile {
@@ -598,6 +612,7 @@ function buildUserProfile(user: UserRow, publicView: boolean): UserProfile {
     bio: user.bio,
     location: user.location,
     website: user.website,
+    avatar: user.avatar ?? null,
     joinedAt: user.created_at,
     rooms: includeRooms ? listUserProfileRooms(user.id) : [],
     agents: includeRooms ? listUserCreatedAgents(user.id) : [],
@@ -625,6 +640,7 @@ interface AgentProfileRow {
   bio: string;
   website: string;
   capabilities: string;
+  avatar: string | null;
   role: Role;
   delivery_mode: string;
   created_at: string;
@@ -642,15 +658,19 @@ function parseCapabilities(raw: string): string[] {
 
 function agentOwner(row: AgentProfileRow): ProfileOwner | null {
   if (row.created_by_type === 'agent') {
-    const owner = db.prepare('SELECT name, handle FROM agents WHERE id = ?').get(row.created_by) as
-      | { name: string; handle: string | null }
+    const owner = db.prepare('SELECT name, handle, avatar FROM agents WHERE id = ?').get(row.created_by) as
+      | { name: string; handle: string | null; avatar: string | null }
       | undefined;
-    return owner?.handle ? { type: 'agent', handle: owner.handle, name: owner.name } : null;
+    return owner?.handle
+      ? { type: 'agent', handle: owner.handle, name: owner.name, avatar: owner.avatar ?? null }
+      : null;
   }
-  const owner = db.prepare('SELECT name, handle FROM users WHERE id = ?').get(row.created_by) as
-    | { name: string; handle: string | null }
+  const owner = db.prepare('SELECT name, handle, avatar FROM users WHERE id = ?').get(row.created_by) as
+    | { name: string; handle: string | null; avatar: string | null }
     | undefined;
-  return owner?.handle ? { type: 'user', handle: owner.handle, name: owner.name } : null;
+  return owner?.handle
+    ? { type: 'user', handle: owner.handle, name: owner.name, avatar: owner.avatar ?? null }
+    : null;
 }
 
 function buildAgentProfile(row: AgentProfileRow): AgentProfile {
@@ -675,6 +695,7 @@ function buildAgentProfile(row: AgentProfileRow): AgentProfile {
     headline: row.headline,
     bio: row.bio,
     website: row.website,
+    avatar: row.avatar ?? null,
     capabilities: parseCapabilities(row.capabilities),
     createdAt: row.created_at,
     role: membership?.role ?? row.role,
@@ -685,7 +706,7 @@ function buildAgentProfile(row: AgentProfileRow): AgentProfile {
 }
 
 const AGENT_PROFILE_SELECT = `
-  SELECT id, room_id, name, handle, headline, bio, website, capabilities, role,
+  SELECT id, room_id, name, handle, headline, bio, website, capabilities, avatar, role,
          delivery_mode, created_at, created_by, created_by_type
   FROM agents
 `;
@@ -713,6 +734,7 @@ export function updateAgentProfile(
     bio?: string;
     website?: string;
     capabilities?: string;
+    avatar?: string;
   },
 ): AgentProfile | undefined {
   const columns: Record<string, string> = {
@@ -722,13 +744,14 @@ export function updateAgentProfile(
     bio: 'bio',
     website: 'website',
     capabilities: 'capabilities',
+    avatar: 'avatar',
   };
   const sets: string[] = [];
   const values: string[] = [];
   for (const [key, column] of Object.entries(columns)) {
-    if (Object.prototype.hasOwnProperty.call(patch, key)) {
+    if (patch[key as keyof typeof patch] !== undefined) {
       sets.push(`${column} = ?`);
-      values.push(String((patch as Record<string, unknown>)[key] ?? ''));
+      values.push(String(patch[key as keyof typeof patch] ?? ''));
     }
   }
   if (patch.headline !== undefined) {
@@ -940,6 +963,7 @@ function mapMessage(row: Row): Message {
     kind: row.kind as MessageKind,
     content: row.content,
     createdAt: row.created_at,
+    editedAt: row.edited_at ?? null,
     seq: Number(row.seq ?? 0),
     mentions: row.mentions ? (JSON.parse(row.mentions) as Mention[]) : [],
     clientMessageId: row.client_message_id ?? null,
@@ -1000,6 +1024,7 @@ export function insertMessage(
       kind,
       content,
       createdAt,
+      editedAt: null,
       seq,
       mentions: options.mentions ?? [],
       clientMessageId: options.clientMessageId ?? null,
@@ -1088,6 +1113,36 @@ export function deleteMessage(roomId: string, messageId: string): Message | unde
   if (!message || message.roomId !== roomId) return undefined;
   db.prepare('DELETE FROM messages WHERE id = ? AND room_id = ?').run(messageId, roomId);
   return message;
+}
+
+export function updateMessage(
+  roomId: string,
+  messageId: string,
+  content: string,
+  mentions: Mention[],
+): Message | undefined {
+  const existing = getMessageById(messageId);
+  if (!existing || existing.roomId !== roomId) return undefined;
+  db.prepare('UPDATE messages SET content = ?, mentions = ?, edited_at = ? WHERE id = ? AND room_id = ?').run(
+    content,
+    JSON.stringify(mentions),
+    nowIso(),
+    messageId,
+    roomId,
+  );
+  return getMessageById(messageId);
+}
+
+export function searchMessages(roomId: string, query: string, limit = 30): Message[] {
+  const pattern = `%${query.replace(/[\\%_]/g, (char) => `\\${char}`)}%`;
+  const rows = db
+    .prepare(
+      `SELECT * FROM messages
+       WHERE room_id = ? AND content LIKE ? ESCAPE '\\'
+       ORDER BY seq DESC LIMIT ?`,
+    )
+    .all(roomId, pattern, limit) as Row[];
+  return rows.map(mapMessage);
 }
 
 export function listMessagesAfter(roomId: string, afterSeq: number, limit = 100): Message[] {

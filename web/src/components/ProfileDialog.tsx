@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { FormEvent } from 'react';
 import { api } from '../lib/api';
+import { AVATAR_IDS, avatarSrc, randomAvatarId } from '../lib/avatars';
 import { profilePath } from '../lib/profile';
 import type { Profile } from '../lib/types';
 import { Modal } from './Modal';
 import { ProfileAvatar } from './ProfileAvatar';
-import { ArrowUpRightIcon, CheckIcon, CopyIcon } from './Icons';
+import { ArrowUpRightIcon, CheckIcon, CopyIcon, SparkleIcon } from './Icons';
 
 interface ProfileDialogProps {
   mode: 'me' | 'agent';
@@ -24,6 +25,7 @@ interface Draft {
   website: string;
   showRooms: boolean;
   capabilities: string;
+  avatar: string;
 }
 
 function draftFrom(profile: Profile): Draft {
@@ -36,6 +38,7 @@ function draftFrom(profile: Profile): Draft {
     website: profile.website,
     showRooms: profile.type === 'user' ? Boolean(profile.showRooms) : false,
     capabilities: profile.type === 'agent' ? profile.capabilities.join(', ') : '',
+    avatar: profile.avatar ?? '',
   };
 }
 
@@ -91,6 +94,12 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
     if (error) setError(null);
   }
 
+  function shuffleAvatar() {
+    let next = randomAvatarId();
+    while (next === draft?.avatar && AVATAR_IDS.length > 1) next = randomAvatarId();
+    patchDraft({ avatar: next });
+  }
+
   async function copyPublicLink() {
     if (!profile) return;
     try {
@@ -130,6 +139,7 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
           location: draft.location.trim(),
           website: draft.website.trim(),
           showRooms: draft.showRooms,
+          ...(draft.avatar ? { avatar: draft.avatar } : {}),
         });
         updated = result.profile;
       } else {
@@ -145,6 +155,7 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
           bio: draft.bio.trim(),
           website: draft.website.trim(),
           capabilities,
+          ...(draft.avatar ? { avatar: draft.avatar } : {}),
         });
         updated = result.profile;
       }
@@ -226,6 +237,7 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
               name={draft.name || profile.name}
               type={profile.type}
               handle={draft.handle || profile.handle}
+              avatar={draft.avatar}
               size="lg"
             />
             <div className="profile-edit-preview-main">
@@ -236,6 +248,43 @@ export function ProfileDialog({ mode, agentId, onClose, onSaved, onNotice }: Pro
             <span className={`profile-kind ${isAgent ? 'is-agent' : ''}`}>
               {isAgent ? 'Agent' : 'Human'}
             </span>
+          </div>
+
+          <div className="profile-edit-section">
+            <div className="profile-avatar-section-head">
+              <div>
+                <span className="section-label">Profile picture</span>
+                <p className="profile-field-hint">
+                  Choose one of 30 RoomForge portraits. Agents get one at random when they join.
+                </p>
+              </div>
+              <button type="button" className="btn btn-quiet btn-tiny" onClick={shuffleAvatar}>
+                <SparkleIcon size={12} /> Surprise me
+              </button>
+            </div>
+            <div className="avatar-picker" role="radiogroup" aria-label="Profile picture">
+              {AVATAR_IDS.map((id, index) => {
+                const selected = draft.avatar === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    aria-label={`Profile picture ${index + 1}`}
+                    className={`avatar-choice ${selected ? 'selected' : ''}`}
+                    onClick={() => patchDraft({ avatar: id })}
+                  >
+                    <img src={avatarSrc(id) ?? ''} alt="" />
+                    {selected ? (
+                      <span className="avatar-choice-check" aria-hidden="true">
+                        <CheckIcon size={11} />
+                      </span>
+                    ) : null}
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           <div className="profile-edit-section">

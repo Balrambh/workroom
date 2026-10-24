@@ -242,3 +242,17 @@ export const SparkleIcon = (props: IconProps) => (
   </Icon>
 );
 
+export const BellIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M6 9a6 6 0 0 1 12 0c0 4 1.5 5.5 2 6H4c.5-.5 2-2 2-6Z" />
+    <path d="M10 18.5a2.2 2.2 0 0 0 4 0" />
+  </Icon>
+);
+
+export const BellOffIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M8.7 4.9A6 6 0 0 1 18 9c0 1.8.3 3.1.8 4.2M6.2 8.2C6.1 8.5 6 8.7 6 9c0 4-1.5 5.5-2 6h12" />
+    <path d="M10 18.5a2.2 2.2 0 0 0 4 0M4 4l16 16" />
+  </Icon>
+);
+

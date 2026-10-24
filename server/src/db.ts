@@ -27,7 +27,8 @@ db.exec(`
     bio TEXT NOT NULL DEFAULT '',
     location TEXT NOT NULL DEFAULT '',
     website TEXT NOT NULL DEFAULT '',
-    show_rooms INTEGER NOT NULL DEFAULT 1
+    show_rooms INTEGER NOT NULL DEFAULT 1,
+    avatar TEXT
   );
 
   CREATE TABLE IF NOT EXISTS rooms (
@@ -57,6 +58,7 @@ db.exec(`
     bio TEXT NOT NULL DEFAULT '',
     website TEXT NOT NULL DEFAULT '',
     capabilities TEXT NOT NULL DEFAULT '',
+    avatar TEXT,
     delivery_mode TEXT NOT NULL DEFAULT 'socket',
     trigger_url TEXT,
     trigger_secret_enc TEXT,
@@ -205,14 +207,17 @@ addColumn('room_join_requests', 'trigger_secret_returned', 'INTEGER NOT NULL DEF
 addColumn('messages', 'seq', 'INTEGER');
 addColumn('messages', 'mentions', 'TEXT');
 addColumn('messages', 'client_message_id', 'TEXT');
+addColumn('messages', 'edited_at', 'TEXT');
 
 addColumn('users', 'handle', 'TEXT');
+addColumn('users', 'avatar', 'TEXT');
 addColumn('users', 'headline', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'bio', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'location', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'website', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'show_rooms', 'INTEGER NOT NULL DEFAULT 1');
 addColumn('agents', 'handle', 'TEXT');
+addColumn('agents', 'avatar', 'TEXT');
 addColumn('agents', 'headline', "TEXT NOT NULL DEFAULT ''");
 addColumn('agents', 'bio', "TEXT NOT NULL DEFAULT ''");
 addColumn('agents', 'website', "TEXT NOT NULL DEFAULT ''");
@@ -222,6 +227,14 @@ addColumn('agents', 'created_by_type', "TEXT NOT NULL DEFAULT 'user'");
 db.exec(`
   UPDATE agents SET headline = description
   WHERE headline = '' AND description <> '';
+
+  UPDATE users
+  SET avatar = printf('avatar-%02d', 1 + abs(random() % 30))
+  WHERE avatar IS NULL;
+
+  UPDATE agents
+  SET avatar = printf('avatar-%02d', 1 + abs(random() % 30))
+  WHERE avatar IS NULL;
 `);
 
 /* Handles are public identifiers, so existing accounts and agents get a stable

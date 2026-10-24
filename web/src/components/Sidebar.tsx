@@ -1,5 +1,5 @@
 import type { RoomSummary, SessionUser } from '../lib/types';
-import { initial } from '../lib/format';
+import { Avatar } from './Avatar';
 import {
   ArrowUpRightIcon,
   BranchIcon,
@@ -139,9 +139,9 @@ export function Sidebar({
             type="button"
             className="user-chip"
             onClick={onOpenProfile}
-            title="Open your profile"
+            title="Edit your profile and profile picture"
           >
-            <span className="avatar">{initial(user.name)}</span>
+            <Avatar name={user.name} type="user" avatar={user.avatar} iconSize={14} />
             <span className="user-main">
               <span className="user-name">{user.name}</span>
               <span className="user-email">{user.handle ? `@${user.handle}` : user.email}</span>

@@ -26,6 +26,7 @@ let roomId = '';
 let roomCode = '';
 let retryAgentId = '';
 const run = () => `${Date.now()}-${RUN_ID}`;
+const AVATAR_PATTERN = /^avatar-(0[1-9]|[12][0-9]|30)$/;
 
 interface TestServer {
   child: ChildProcess;
@@ -222,7 +223,11 @@ async function createAgent(input: Record<string, unknown>) {
     body: input,
   });
   assert.equal(response.status, 201, JSON.stringify(response.body));
-  return response.body as { agent: { id: string; name: string }; token: string; triggerSecret?: string };
+  return response.body as {
+    agent: { id: string; name: string; avatar?: string | null };
+    token: string;
+    triggerSecret?: string;
+  };
 }
 
 before(async () => {
@@ -372,6 +377,73 @@ test('accounts, room permissions, and message idempotency', async () => {
     body: { content: 'x'.repeat(4001) },
   });
   assert.equal(oversized.status, 400);
+
+  const edited = await api(server.base, `/rooms/${roomId}/messages/${first.body.id}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { content: 'edited hello @ViewerBot' },
+  });
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.content, 'edited hello @ViewerBot');
+  assert.ok(edited.body.editedAt);
+  assert.deepEqual(edited.body.mentions, [{ type: 'agent', id: viewer.agent.id }]);
+
+  const viewerEdit = await api(server.base, `/rooms/${roomId}/messages/${first.body.id}`, {
+    method: 'PATCH',
+    token: viewer.token,
+    body: { content: 'viewer overwrite' },
+  });
+  assert.equal(viewerEdit.status, 403);
+
+  const search = await api(
+    server.base,
+    `/rooms/${roomId}/messages/search?q=${encodeURIComponent('edited hello')}`,
+    { token: adminToken },
+  );
+  assert.equal(search.status, 200);
+  assert.equal(search.body.messages.length, 1);
+  assert.equal(search.body.messages[0].id, first.body.id);
+  assert.ok(search.body.messages[0].editedAt);
+
+  const literalSearch = await api(
+    server.base,
+    `/rooms/${roomId}/messages/search?q=${encodeURIComponent('%_')}`,
+    { token: adminToken },
+  );
+  assert.equal(literalSearch.status, 200);
+  assert.equal(literalSearch.body.messages.length, 0);
+
+  const outsiderSearch = await api(
+    server.base,
+    `/rooms/${roomId}/messages/search?q=hello`,
+    { token: memberToken },
+  );
+  assert.equal(outsiderSearch.status, 404);
+
+  const ws = await openWs(`${server.base.replace('http', 'ws')}/ws?token=${adminToken}`);
+  try {
+    const inbox = wsCollector(ws);
+    await inbox.waitFor('ready');
+    ws.send(JSON.stringify({ type: 'room.join', roomId }));
+    await inbox.waitFor('room.state');
+
+    ws.send(JSON.stringify({ type: 'typing.set', roomId, typing: true }));
+    const typing = await waitFor('typing indicator', () =>
+      inbox.messages.find((message) => message.type === 'typing.update' && message.typing.length === 1),
+    );
+    assert.equal(typing.roomId, roomId);
+    assert.equal(typing.typing[0].name, 'Admin');
+
+    ws.send(JSON.stringify({ type: 'typing.set', roomId, typing: false }));
+    await waitFor('typing cleared', () =>
+      inbox.messages.find(
+        (message) =>
+          message.type === 'typing.update' && message.typing.length === 0 && message !== typing,
+      ),
+    );
+  } finally {
+    await closeWs(ws);
+  }
 });
 
 test('browser sessions use an HttpOnly cookie', async () => {
@@ -404,6 +476,78 @@ test('browser sessions use an HttpOnly cookie', async () => {
   const logout = await api(server.base, '/auth/logout', { method: 'POST', headers: { cookie } });
   assert.equal(logout.status, 204);
   assert.match(logout.headers.get('set-cookie') ?? '', /Max-Age=0/);
+});
+
+test('profile pictures are assigned automatically and can be changed', async () => {
+  const initial = await roomState();
+  assert.match(String(initial.me.avatar), AVATAR_PATTERN);
+  const selfMember = initial.members.find(
+    (member: any) => member.type === 'user' && member.id === initial.me.id,
+  );
+  assert.equal(selfMember?.avatar, initial.me.avatar);
+
+  const created = await createAgent({ name: 'PortraitBot', role: 'member' });
+  assert.match(String(created.agent.avatar), AVATAR_PATTERN);
+  const agentPrincipal = await api(server.base, '/me', { token: created.token });
+  assert.equal(agentPrincipal.status, 200);
+  assert.equal(agentPrincipal.body.principal.avatar, created.agent.avatar);
+
+  const withAgent = await roomState();
+  const agentMember = withAgent.members.find(
+    (member: any) => member.type === 'agent' && member.id === created.agent.id,
+  );
+  assert.equal(agentMember?.avatar, created.agent.avatar);
+
+  const userAvatar = 'avatar-17';
+  const userPatch = await api(server.base, '/me/profile', {
+    method: 'PATCH',
+    token: adminToken,
+    body: { avatar: userAvatar },
+  });
+  assert.equal(userPatch.status, 200);
+  assert.equal(userPatch.body.profile.type, 'user');
+  assert.ok(!('password_hash' in userPatch.body.profile));
+  assert.equal(userPatch.body.profile.avatar, userAvatar);
+
+  const userProfile = await api(server.base, '/me/profile', { token: adminToken });
+  assert.equal(userProfile.body.profile.avatar, userAvatar);
+  const publicUser = await api(server.base, `/profiles/users/${userProfile.body.profile.handle}`);
+  assert.equal(publicUser.status, 200);
+  assert.equal(publicUser.body.profile.avatar, userAvatar);
+
+  const agentAvatar = 'avatar-04';
+  const agentPatch = await api(server.base, `/agents/${created.agent.id}/profile`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { avatar: agentAvatar },
+  });
+  assert.equal(agentPatch.status, 200);
+  assert.equal(agentPatch.body.profile.avatar, agentAvatar);
+  const publicAgent = await api(server.base, `/profiles/agents/${agentPatch.body.profile.handle}`);
+  assert.equal(publicAgent.status, 200);
+  assert.equal(publicAgent.body.profile.avatar, agentAvatar);
+
+  const refreshed = await roomState();
+  assert.equal(refreshed.me.avatar, userAvatar);
+  const refreshedAgent = refreshed.members.find(
+    (member: any) => member.type === 'agent' && member.id === created.agent.id,
+  );
+  assert.equal(refreshedAgent?.avatar, agentAvatar);
+
+  for (const invalid of ['avatar-00', 'avatar-31', '../avatar-01']) {
+    const rejected = await api(server.base, '/me/profile', {
+      method: 'PATCH',
+      token: adminToken,
+      body: { avatar: invalid },
+    });
+    assert.equal(rejected.status, 400, invalid);
+  }
+  const rejectedAgent = await api(server.base, `/agents/${created.agent.id}/profile`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { avatar: 'avatar-31' },
+  });
+  assert.equal(rejectedAgent.status, 400);
 });
 
 test('agent join over REST polling and admin approval', async () => {
@@ -440,6 +584,7 @@ test('agent join over REST polling and admin approval', async () => {
   });
   assert.equal(approve.status, 200);
   assert.equal(approve.body.member.type, 'agent');
+  assert.match(approve.body.member.avatar, AVATAR_PATTERN);
   const agentToken = approve.body.token as string;
   assert.match(agentToken, /^rf_/);
 
