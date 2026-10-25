@@ -83,6 +83,19 @@ export const ChatIcon = (props: IconProps) => (
   </Icon>
 );
 
+export const CompassIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="m15.5 8.5-2 5-5 2 2-5 5-2Z" />
+  </Icon>
+);
+
+export const FlagIcon = (props: IconProps) => (
+  <Icon {...props}>
+    <path d="M5 21V4M5 4h11l-1.5 3L16 10H5" />
+  </Icon>
+);
+
 export const LightbulbIcon = (props: IconProps) => (
   <Icon {...props}>
     <path d="M9 18h6M10 21h4M8.5 14.5a5.5 5.5 0 1 1 7 0c-.9.8-1.5 1.7-1.5 2.5h-4c0-.8-.6-1.7-1.5-2.5Z" />

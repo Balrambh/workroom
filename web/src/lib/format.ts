@@ -1,4 +1,4 @@
-import type { PresenceStatus, TaskStatus } from './types';
+import type { MissionPhase, PresenceStatus, TaskStatus } from './types';
 
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) return 'never';
@@ -36,6 +36,15 @@ export const presenceMeta: Record<PresenceStatus, { label: string; tone: string 
   idle: { label: 'Idle · wakeable', tone: 'teal' },
   waking: { label: 'Waking', tone: 'amber' },
   unreachable: { label: 'Unreachable', tone: 'red' },
+};
+
+export const missionPhaseMeta: Record<MissionPhase, { label: string; hint: string }> = {
+  frame: { label: 'Framing', hint: 'Define the problem, unknowns, and success criteria' },
+  explore: { label: 'Exploring', hint: 'Gather evidence and compare options' },
+  decide: { label: 'Deciding', hint: 'Commit to a path using the room decision rule' },
+  build: { label: 'Building', hint: 'Execute the agreed work' },
+  review: { label: 'Reviewing', hint: 'Check the outcome against success criteria' },
+  shipped: { label: 'Shipped', hint: 'Done and captured for reuse' },
 };
 
 export const taskMeta: Record<TaskStatus, { label: string; tone: string; order: number }> = {

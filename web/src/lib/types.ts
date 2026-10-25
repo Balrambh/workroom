@@ -14,7 +14,11 @@ export type PresenceStatus =
   | 'waking'
   | 'unreachable';
 export type DeliveryMode = 'socket' | 'trigger';
-export type WorkspaceTab = 'people' | 'tasks' | 'repos' | 'activity';
+export type MissionPhase = 'frame' | 'explore' | 'decide' | 'build' | 'review' | 'shipped';
+export type DecisionMethod = 'admin' | 'consent' | 'majority' | 'quorum';
+export type DecisionStatus = 'open' | 'decided' | 'withdrawn';
+export type QuestionStatus = 'open' | 'resolved' | 'parked';
+export type WorkspaceTab = 'mission' | 'people' | 'tasks' | 'repos' | 'activity';
 
 export interface ProfileTarget {
   type: PrincipalType;
@@ -58,6 +62,7 @@ export interface RoomSummary {
   visibility: RoomVisibility;
   unreadCount: number;
   pendingRequests: number;
+  parentRoomId: string | null;
 }
 
 export interface Member {
@@ -70,6 +75,7 @@ export interface Member {
   handle: string | null;
   headline: string | null;
   avatar: string | null;
+  capabilities: string[];
 }
 
 export interface ProfileRoom {
@@ -162,6 +168,7 @@ export interface Room {
   createdBy: string;
   code?: string;
   visibility: RoomVisibility;
+  parentRoomId: string | null;
 }
 
 export interface Repo {
@@ -265,6 +272,181 @@ export interface VoiceParticipant {
   joinedAt: string;
 }
 
+export interface Mission {
+  roomId: string;
+  objective: string;
+  successCriteria: string;
+  constraints: string;
+  phase: MissionPhase;
+  decisionMode: DecisionMethod;
+  quorum: number;
+  createdByType: PrincipalType;
+  createdById: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MissionQuestion {
+  id: string;
+  roomId: string;
+  title: string;
+  detail: string;
+  status: QuestionStatus;
+  ownerType: PrincipalType | null;
+  ownerId: string | null;
+  ownerName: string | null;
+  createdByType: PrincipalType;
+  createdById: string;
+  createdByName: string;
+  resolution: string;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt: string | null;
+}
+
+export interface DecisionOption {
+  id: string;
+  label: string;
+}
+
+export interface DecisionVote {
+  voterType: PrincipalType;
+  voterId: string;
+  voterName: string;
+  choice: string;
+  comment: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface DecisionTally {
+  votes: number;
+  support: number;
+  consent: number;
+  objection: number;
+  abstain: number;
+  byOption: Record<string, number>;
+  leadingOptionId: string | null;
+  quorumMet: boolean;
+  ready: boolean;
+}
+
+export interface Decision {
+  id: string;
+  roomId: string;
+  title: string;
+  context: string;
+  method: DecisionMethod;
+  quorum: number;
+  status: DecisionStatus;
+  options: DecisionOption[];
+  votes: DecisionVote[];
+  tally: DecisionTally;
+  dependencies: DecisionDependency[];
+  dueAt: string | null;
+  createdByType: PrincipalType;
+  createdById: string;
+  createdByName: string;
+  createdAt: string;
+  updatedAt: string;
+  decidedOptionId: string | null;
+  decidedOptionLabel: string | null;
+  rationale: string;
+  decidedByType: PrincipalType | null;
+  decidedById: string | null;
+  decidedByName: string | null;
+  decidedAt: string | null;
+}
+
+export interface DecisionDependency {
+  decisionId: string;
+  roomId: string;
+  roomName: string;
+  roomCode?: string;
+  title: string;
+  status: DecisionStatus;
+  decidedOptionLabel: string | null;
+}
+
+export interface RelatedDecision {
+  id: string;
+  roomId: string;
+  roomName: string;
+  roomCode?: string;
+  title: string;
+  method: DecisionMethod;
+  status: DecisionStatus;
+  decidedOptionLabel: string | null;
+  dueAt: string | null;
+}
+
+export interface FamilyParent {
+  id: string;
+  name: string;
+  topic: string;
+  code?: string;
+  phase: MissionPhase;
+  objective: string;
+  decisionMode: DecisionMethod;
+  quorum: number;
+}
+
+export interface WorkstreamSummary {
+  id: string;
+  name: string;
+  topic: string;
+  code?: string;
+  phase: MissionPhase;
+  objective: string;
+  openQuestions: number;
+  openDecisions: number;
+  blockedDecisions: number;
+  memberCount: number;
+  updatedAt: string;
+}
+
+export interface MissionPatch {
+  objective?: string;
+  successCriteria?: string;
+  constraints?: string;
+  phase?: MissionPhase;
+  decisionMode?: DecisionMethod;
+  quorum?: number;
+}
+
+export interface QuestionInput {
+  title: string;
+  detail: string;
+  ownerType?: PrincipalType | null;
+  ownerId?: string | null;
+}
+
+export interface QuestionPatch {
+  title?: string;
+  detail?: string;
+  status?: QuestionStatus;
+  ownerType?: PrincipalType | null;
+  ownerId?: string | null;
+  resolution?: string;
+}
+
+export interface DecisionInput {
+  title: string;
+  context: string;
+  method?: DecisionMethod;
+  quorum?: number;
+  options: string[];
+  dueAt?: string | null;
+  notifyAgents?: boolean;
+  dependsOn?: { roomId: string; decisionId: string }[];
+}
+
+export interface DecisionCloseInput {
+  status: 'decided' | 'withdrawn';
+  optionId?: string | null;
+  rationale?: string;
+}
+
 export interface RoomState {
   room: Room;
   me: { type: PrincipalType; id: string; name: string; role: Role; avatar?: string };
@@ -276,6 +458,12 @@ export interface RoomState {
   presence: PresenceEntry[];
   voice: VoiceParticipant[];
   typing?: TypingEntry[];
+  mission: Mission;
+  questions: MissionQuestion[];
+  decisions: Decision[];
+  parent: FamilyParent | null;
+  workstreams: WorkstreamSummary[];
+  relatedDecisions: RelatedDecision[];
   joinRequests?: JoinRequest[];
   unreadCount?: number;
 }
@@ -397,6 +585,19 @@ export interface RoomActions {
   removeMember(member: Member): Promise<void>;
   approveJoinRequest(requestId: string): Promise<void>;
   denyJoinRequest(requestId: string): Promise<void>;
+  updateMission(patch: MissionPatch): Promise<void>;
+  createQuestion(input: QuestionInput): Promise<void>;
+  updateQuestion(questionId: string, patch: QuestionPatch): Promise<void>;
+  deleteQuestion(questionId: string): Promise<void>;
+  createDecision(input: DecisionInput): Promise<void>;
+  voteDecision(decisionId: string, choice: string, comment?: string): Promise<void>;
+  closeDecision(decisionId: string, input: DecisionCloseInput): Promise<void>;
+  createWorkstream(input: {
+    name: string;
+    topic: string;
+    objective: string;
+  }): Promise<WorkstreamSummary>;
+  openRoom(roomId: string): void;
   refreshRoom(): Promise<void>;
   openMyProfile(): void;
   copy(text: string, label: string): void;

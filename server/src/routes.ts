@@ -18,6 +18,8 @@ import { isAvatarValue, MAX_AVATAR_LENGTH } from './avatars.js';
 import { HttpError } from './errors.js';
 import { handleValidationError, normalizeHandle } from './handles.js';
 import * as hub from './hub.js';
+import * as mission from './mission.js';
+import { missionRouter } from './mission-routes.js';
 import * as store from './store.js';
 import { decryptSecret, encryptSecret, newTriggerSecret, testTrigger, validateTriggerUrl } from './trigger.js';
 import type { DeliveryMode, Member, MessageKind, PresenceEntry, Principal, Role, Room, TaskStatus } from './types.js';
@@ -160,6 +162,10 @@ function agentBriefing(
   const roomUrl = `${api}/rooms/${room.id}`;
   const socketUrl = `${origin.replace(/^http/, 'ws')}/ws?token=${encodeURIComponent(token)}`;
   const auth = `Bearer ${token}`;
+  const roomMission = mission.getMission(room.id);
+  const family = mission.getFamilyView(room.id);
+  const openQuestions = mission.listQuestions(room.id).filter((question) => question.status === 'open').length;
+  const openDecisions = mission.listDecisions(room.id).filter((decision) => decision.status === 'open').length;
 
   return {
     message: `You are "${agent.name}" in RoomForge room "${room.name}".`,
@@ -170,7 +176,23 @@ function agentBriefing(
       name: room.name,
       topic: room.topic,
       mode: room.mode,
+      parentRoomId: room.parentRoomId,
     },
+    mission: roomMission
+      ? {
+          phase: roomMission.phase,
+          objective: roomMission.objective,
+          successCriteria: roomMission.successCriteria,
+          constraints: roomMission.constraints,
+          decisionRule: { mode: roomMission.decisionMode, quorum: roomMission.quorum },
+          openQuestions,
+          openDecisions,
+          parent: family.parent
+            ? { id: family.parent.id, name: family.parent.name, code: family.parent.code }
+            : null,
+          workstreams: family.workstreams.length,
+        }
+      : null,
     connect: {
       baseUrl: api,
       authorization: auth,
@@ -193,6 +215,9 @@ function agentBriefing(
         'tasks.replaced',
         'presence.update',
         'members.updated',
+        'mission.updated',
+        'questions.updated',
+        'decisions.updated',
       ],
       note: 'Open the socket once and keep it open. New messages and room events arrive instantly; the server pings every 30s.',
     },
@@ -202,6 +227,10 @@ function agentBriefing(
       request: `GET ${roomUrl}`,
     },
     do: {
+      brief: {
+        request: `GET ${roomUrl}/context`,
+        note: 'Start here. Returns the mission, open questions, decisions, work, team capabilities, and a message cursor.',
+      },
       say: {
         request: `POST ${roomUrl}/messages`,
         body: { content: 'On it.', kind: 'chat' },
@@ -210,12 +239,29 @@ function agentBriefing(
         request: `PATCH ${roomUrl}/presence`,
         body: { status: 'working', activity: 'Working' },
       },
+      ask: {
+        request: `POST ${roomUrl}/questions`,
+        body: { title: 'What would make this result trustworthy?', detail: 'Open question for the room.' },
+      },
+      propose: {
+        request: `POST ${roomUrl}/decisions`,
+        body: {
+          title: 'Choose the first approach',
+          context: 'Evidence and tradeoffs for each option.',
+          options: ['Option A', 'Option B'],
+          method: 'consent',
+        },
+      },
+      vote: {
+        request: `POST ${roomUrl}/decisions/<decisionId>/votes`,
+        body: { choice: '<optionId | consent | objection | abstain>', comment: 'Why.' },
+      },
       claimTask: {
         request: `PATCH ${roomUrl}/tasks/<taskId>`,
         body: { status: 'doing' },
       },
     },
-    firstStep: `Open ${socketUrl}, then send {"type":"message.send","content":"I'm connected."}. If you cannot hold a socket, use GET ${roomUrl} with Authorization: ${auth}.`,
+    firstStep: `Read GET ${roomUrl}/context with Authorization: ${auth}, then open ${socketUrl} and send {"type":"message.send","content":"I'm connected."} You can act on the mission before tasks exist.`,
     guide: `${origin}/agent-guide`,
   };
 }
@@ -1011,8 +1057,12 @@ router.delete('/rooms/:roomId', (req, res) => {
   const principal = principalOf(req as AuthedRequest);
   adminOrThrow(req.params.roomId, principal);
   const room = roomOrThrow(req.params.roomId);
+  const childRoomIds = store.listChildRoomIds(room.id);
   hub.broadcastRoomDeleted(room.id);
   store.deleteRoom(room.id);
+  for (const childId of childRoomIds) {
+    hub.broadcast(childId, { type: 'family.updated', ...mission.getFamilyView(childId) });
+  }
   res.json({ ok: true, roomId: room.id });
 });
 
@@ -1641,5 +1691,7 @@ router.delete('/rooms/:roomId/tasks/:taskId', (req, res) => {
 });
 
 /* ------------------------------ helpers --------------------------------- */
+
+router.use(missionRouter);
 
 export const apiRouter = router;

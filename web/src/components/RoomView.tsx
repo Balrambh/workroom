@@ -6,7 +6,7 @@ import type {
   WorkspacePanelRequest,
 } from '../lib/types';
 import { useRoomVoice } from '../lib/useRoomVoice';
-import { presenceMeta } from '../lib/format';
+import { missionPhaseMeta, presenceMeta } from '../lib/format';
 import { Avatar } from './Avatar';
 import { ChatPanel } from './ChatPanel';
 import { LinkifyText } from './LinkifyText';
@@ -17,6 +17,7 @@ import { VoiceStage } from './VoiceStage';
 import {
   BranchIcon,
   CopyIcon,
+  FlagIcon,
   HashIcon,
   MenuIcon,
   PanelsIcon,
@@ -66,6 +67,11 @@ export function RoomView({
   );
   const headerPeople = state.members.slice(0, 4);
   const extraPeople = Math.max(0, state.members.length - headerPeople.length);
+  const phaseMeta = missionPhaseMeta[state.mission.phase];
+  const briefMissing = !state.mission.objective.trim();
+  const openMissionItems =
+    state.questions.filter((question) => question.status === 'open').length +
+    state.decisions.filter((decision) => decision.status === 'open').length;
 
   useEffect(() => {
     setDetailsOpen(false);
@@ -125,6 +131,21 @@ export function RoomView({
                 unlisted
               </span>
             ) : null}
+            <button
+              type="button"
+              className={`room-phase-chip phase-${state.mission.phase} ${
+                briefMissing ? 'needs-brief' : ''
+              }`}
+              title={`${phaseMeta.hint}${briefMissing ? ' · The mission brief is still blank' : ''}`}
+              aria-label={`Mission phase: ${phaseMeta.label}. Open the mission workspace`}
+              onClick={() => openPanel('mission')}
+            >
+              <FlagIcon size={11} />
+              <span>{phaseMeta.label}</span>
+              {openMissionItems > 0 ? (
+                <span className="room-phase-count">{openMissionItems}</span>
+              ) : null}
+            </button>
           </div>
           <p className="room-topic">
             <LinkifyText text={state.room.topic || 'No topic set for this room.'} />

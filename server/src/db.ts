@@ -40,7 +40,8 @@ db.exec(`
     created_by TEXT NOT NULL,
     created_at TEXT NOT NULL,
     last_seq INTEGER NOT NULL DEFAULT 0,
-    visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'unlisted'))
+    visibility TEXT NOT NULL DEFAULT 'public' CHECK (visibility IN ('public', 'unlisted')),
+    parent_room_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS agents (
@@ -138,6 +139,87 @@ db.exec(`
     created_at TEXT NOT NULL
   );
 
+  CREATE TABLE IF NOT EXISTS missions (
+    room_id TEXT PRIMARY KEY REFERENCES rooms(id) ON DELETE CASCADE,
+    objective TEXT NOT NULL DEFAULT '',
+    success_criteria TEXT NOT NULL DEFAULT '',
+    constraints TEXT NOT NULL DEFAULT '',
+    phase TEXT NOT NULL DEFAULT 'frame'
+      CHECK (phase IN ('frame', 'explore', 'decide', 'build', 'review', 'shipped')),
+    decision_mode TEXT NOT NULL DEFAULT 'consent'
+      CHECK (decision_mode IN ('admin', 'consent', 'majority', 'quorum')),
+    quorum INTEGER NOT NULL DEFAULT 2,
+    created_by_type TEXT NOT NULL DEFAULT 'user',
+    created_by_id TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS mission_questions (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    detail TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'open'
+      CHECK (status IN ('open', 'resolved', 'parked')),
+    owner_type TEXT,
+    owner_id TEXT,
+    owner_name TEXT,
+    created_by_type TEXT NOT NULL,
+    created_by_id TEXT NOT NULL,
+    created_by_name TEXT NOT NULL,
+    resolution TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    resolved_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS decisions (
+    id TEXT PRIMARY KEY,
+    room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    context TEXT NOT NULL DEFAULT '',
+    method TEXT NOT NULL
+      CHECK (method IN ('admin', 'consent', 'majority', 'quorum')),
+    quorum INTEGER NOT NULL DEFAULT 2,
+    status TEXT NOT NULL DEFAULT 'open'
+      CHECK (status IN ('open', 'decided', 'withdrawn')),
+    options TEXT NOT NULL,
+    due_at TEXT,
+    created_by_type TEXT NOT NULL,
+    created_by_id TEXT NOT NULL,
+    created_by_name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    decided_option_id TEXT,
+    decided_option_label TEXT,
+    rationale TEXT NOT NULL DEFAULT '',
+    decided_by_type TEXT,
+    decided_by_id TEXT,
+    decided_by_name TEXT,
+    decided_at TEXT
+  );
+
+  CREATE TABLE IF NOT EXISTS decision_votes (
+    decision_id TEXT NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    voter_type TEXT NOT NULL,
+    voter_id TEXT NOT NULL,
+    voter_name TEXT NOT NULL,
+    choice TEXT NOT NULL,
+    comment TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    PRIMARY KEY (decision_id, voter_type, voter_id)
+  );
+
+  CREATE TABLE IF NOT EXISTS decision_dependencies (
+    decision_id TEXT NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    depends_on_decision_id TEXT NOT NULL REFERENCES decisions(id) ON DELETE CASCADE,
+    depends_on_room_id TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (decision_id, depends_on_decision_id)
+  );
+
   CREATE TABLE IF NOT EXISTS room_join_requests (
     id TEXT PRIMARY KEY,
     room_id TEXT NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
@@ -180,6 +262,10 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_members_principal ON room_members(principal_type, principal_id);
   CREATE INDEX IF NOT EXISTS idx_trigger_events_due ON trigger_events(status, next_attempt_at);
   CREATE INDEX IF NOT EXISTS idx_trigger_events_agent ON trigger_events(agent_id, room_id, status);
+  CREATE INDEX IF NOT EXISTS idx_questions_room ON mission_questions(room_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_decisions_room ON decisions(room_id, status, created_at);
+  CREATE INDEX IF NOT EXISTS idx_decision_votes_decision ON decision_votes(decision_id);
+  CREATE INDEX IF NOT EXISTS idx_decision_deps_target ON decision_dependencies(depends_on_decision_id);
 `);
 
 /* Additive migrations for databases created before wake/trigger support. */
@@ -194,6 +280,8 @@ function addColumn(table: string, column: string, definition: string): void {
 
 addColumn('rooms', 'last_seq', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('rooms', 'visibility', "TEXT NOT NULL DEFAULT 'public'");
+addColumn('rooms', 'parent_room_id', 'TEXT');
+db.exec('CREATE INDEX IF NOT EXISTS idx_rooms_parent ON rooms(parent_room_id)');
 addColumn('agents', 'delivery_mode', "TEXT NOT NULL DEFAULT 'socket'");
 addColumn('agents', 'trigger_url', 'TEXT');
 addColumn('agents', 'trigger_secret_enc', 'TEXT');
@@ -288,6 +376,17 @@ db.exec(`
     WHERE handle IS NOT NULL AND handle <> '';
   CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_handle ON agents(handle COLLATE NOCASE)
     WHERE handle IS NOT NULL AND handle <> '';
+`);
+
+/* Every room has a mission from the moment it exists, including rooms created
+ * before the mission layer. A blank brief is itself a useful early signal: the
+ * room is still framing the problem. */
+db.exec(`
+  INSERT OR IGNORE INTO missions
+    (room_id, objective, success_criteria, constraints, phase, decision_mode, quorum,
+     created_by_type, created_by_id, created_at, updated_at)
+  SELECT id, '', '', '', 'frame', 'consent', 2, 'user', created_by, created_at, created_at
+  FROM rooms
 `);
 
 /* Backfill sequence numbers so existing rooms can catch up with after_seq. */

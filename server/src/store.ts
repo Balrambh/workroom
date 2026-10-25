@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { pickAvatar } from './avatars.js';
 import { db } from './db.js';
 import { handleFromName } from './handles.js';
+import { ensureMission, getMission, updateMission } from './mission.js';
 import type {
   Activity,
   AgentProfile,
@@ -193,6 +194,7 @@ function mapRoom(row: Row): Room {
     createdBy: row.created_by,
     code: row.code,
     visibility: (row.visibility as RoomVisibility) ?? 'public',
+    parentRoomId: row.parent_room_id ?? null,
   };
 }
 
@@ -220,6 +222,7 @@ export function createRoom(
   mode: RoomMode,
   creator: Principal,
   visibility: RoomVisibility = 'public',
+  parentRoomId: string | null = null,
 ): Room {
   let code = newRoomCode();
   while (db.prepare('SELECT 1 FROM rooms WHERE code = ? COLLATE NOCASE').get(code)) {
@@ -228,11 +231,50 @@ export function createRoom(
   const id = randomUUID();
   const createdAt = nowIso();
   db.prepare(
-    `INSERT INTO rooms (id, name, topic, mode, code, created_by, created_at, visibility)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-  ).run(id, name, topic, mode, code, creator.id, createdAt, visibility);
+    `INSERT INTO rooms (id, name, topic, mode, code, created_by, created_at, visibility, parent_room_id)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(id, name, topic, mode, code, creator.id, createdAt, visibility, parentRoomId);
   addMember(id, creator, 'admin');
+  ensureMission(id, creator);
   return getRoom(id)!;
+}
+
+export function createWorkstreamRoom(
+  parent: Room,
+  name: string,
+  topic: string,
+  objective: string,
+  creator: Principal,
+): Room {
+  const missionBefore = getMission(parent.id);
+  const child = createRoom(name, topic, parent.mode, creator, 'unlisted', parent.id);
+
+  for (const member of listMembers(parent.id)) {
+    if (member.type !== 'user') continue;
+    addMember(child.id, { type: 'user', id: member.id, name: member.name }, member.role);
+  }
+  removeMember(child.id, creator.type, creator.id);
+  if (creator.type === 'user') {
+    addMember(child.id, creator, 'admin');
+  }
+
+  const inherited = getMission(child.id);
+  if (inherited) {
+    updateMission(child.id, {
+      objective,
+      constraints: missionBefore?.constraints ?? '',
+      decisionMode: missionBefore?.decisionMode ?? inherited.decisionMode,
+      quorum: missionBefore?.quorum ?? inherited.quorum,
+    });
+  }
+  return child;
+}
+
+export function listChildRoomIds(roomId: string): string[] {
+  const rows = db.prepare('SELECT id FROM rooms WHERE parent_room_id = ?').all(roomId) as {
+    id: string;
+  }[];
+  return rows.map((row) => row.id);
 }
 
 export function updateRoom(
@@ -259,6 +301,7 @@ export function updateRoom(
 }
 
 export function deleteRoom(roomId: string): void {
+  db.prepare('UPDATE rooms SET parent_room_id = NULL WHERE parent_room_id = ?').run(roomId);
   db.prepare('DELETE FROM rooms WHERE id = ?').run(roomId);
 }
 
@@ -281,7 +324,7 @@ export function leaveRoom(roomId: string, userId: string): void {
 export function listRoomsFor(principal: Principal): RoomSummary[] {
   const rows = db
     .prepare(
-      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, r.visibility, rm.role,
+      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, r.visibility, r.parent_room_id, rm.role,
               (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count,
               (SELECT COUNT(*) FROM messages msg
                  WHERE msg.room_id = r.id
@@ -310,13 +353,14 @@ export function listRoomsFor(principal: Principal): RoomSummary[] {
     pendingRequests: row.role === 'admin' ? Number(row.pending_requests) : 0,
     visibility: (row.visibility as RoomVisibility) ?? 'public',
     createdAt: row.created_at,
+    parentRoomId: row.parent_room_id ?? null,
   }));
 }
 
 export function listPublicRooms(): (RoomSummary & { code: string; createdAt: string })[] {
   const rows = db
     .prepare(
-      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, r.visibility,
+      `SELECT r.id, r.name, r.topic, r.mode, r.code, r.created_at, r.visibility, r.parent_room_id,
               (SELECT COUNT(*) FROM room_members m WHERE m.room_id = r.id) AS member_count
        FROM rooms r
        WHERE r.visibility = 'public'
@@ -336,6 +380,7 @@ export function listPublicRooms(): (RoomSummary & { code: string; createdAt: str
     pendingRequests: 0,
     visibility: (row.visibility as RoomVisibility) ?? 'public',
     createdAt: row.created_at,
+    parentRoomId: row.parent_room_id ?? null,
   }));
 }
 
@@ -388,6 +433,7 @@ export function listMembers(roomId: string): Member[] {
               a.description AS description,
               COALESCE(u.handle, a.handle) AS handle,
               COALESCE(u.avatar, a.avatar) AS avatar,
+              a.capabilities AS capabilities,
               CASE WHEN rm.principal_type = 'agent'
                    THEN COALESCE(NULLIF(a.headline, ''), NULLIF(a.description, ''))
                    ELSE NULL END AS headline
@@ -409,6 +455,7 @@ export function listMembers(roomId: string): Member[] {
     handle: row.handle ?? null,
     headline: row.headline ?? null,
     avatar: row.avatar ?? null,
+    capabilities: row.capabilities ? parseCapabilities(row.capabilities) : [],
   }));
 }
 

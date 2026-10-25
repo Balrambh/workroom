@@ -5,14 +5,24 @@ import { clearSession, readSession, saveSession } from './lib/session';
 import type {
   Activity,
   CreateAgentResult,
+  Decision,
+  DecisionCloseInput,
+  DecisionInput,
+  FamilyParent,
   Member,
   Message,
   MessageKind,
   JoinRequest,
+  Mission,
+  MissionPatch,
+  MissionQuestion,
   PresenceEntry,
   PresenceStatus,
   PrincipalType,
   ProfileTarget,
+  QuestionInput,
+  QuestionPatch,
+  RelatedDecision,
   Role,
   Room,
   RoomActions,
@@ -26,6 +36,7 @@ import type {
   TaskInput,
   TaskPatch,
   VoiceParticipant,
+  WorkstreamSummary,
   WorkspacePanelRequest,
   WorkspaceTab,
 } from './lib/types';
@@ -548,6 +559,37 @@ export default function App({ initialCode }: AppProps = {}) {
           if (payload.roomId !== active) break;
           setRoomState((prev) => (prev ? { ...prev, tasks: payload.tasks as Task[] } : prev));
           break;
+        case 'mission.updated':
+          if (payload.roomId !== active) break;
+          setRoomState((prev) =>
+            prev ? { ...prev, mission: payload.mission as Mission } : prev,
+          );
+          break;
+        case 'questions.updated':
+          if (payload.roomId !== active) break;
+          setRoomState((prev) =>
+            prev ? { ...prev, questions: payload.questions as MissionQuestion[] } : prev,
+          );
+          break;
+        case 'decisions.updated':
+          if (payload.roomId !== active) break;
+          setRoomState((prev) =>
+            prev ? { ...prev, decisions: payload.decisions as Decision[] } : prev,
+          );
+          break;
+        case 'family.updated':
+          if (payload.roomId !== active) break;
+          setRoomState((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  parent: payload.parent as FamilyParent | null,
+                  workstreams: payload.workstreams as WorkstreamSummary[],
+                  relatedDecisions: payload.relatedDecisions as RelatedDecision[],
+                }
+              : prev,
+          );
+          break;
         case 'task.deleted':
           if (payload.roomId !== active) break;
           setRoomState((prev) =>
@@ -780,6 +822,69 @@ export default function App({ initialCode }: AppProps = {}) {
       if (!roomId) return;
       await api.deleteTask(roomId, taskId);
       await refreshIfOffline(roomId);
+    },
+
+    async updateMission(patch: MissionPatch) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.updateMission(roomId, patch);
+      await refreshIfOffline(roomId);
+    },
+
+    async createQuestion(input: QuestionInput) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.createQuestion(roomId, input);
+      await refreshIfOffline(roomId);
+    },
+
+    async updateQuestion(questionId: string, patch: QuestionPatch) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.updateQuestion(roomId, questionId, patch);
+      await refreshIfOffline(roomId);
+    },
+
+    async deleteQuestion(questionId: string) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.deleteQuestion(roomId, questionId);
+      await refreshIfOffline(roomId);
+    },
+
+    async createDecision(input: DecisionInput) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.createDecision(roomId, input);
+      await refreshIfOffline(roomId);
+    },
+
+    async voteDecision(decisionId: string, choice: string, comment = '') {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.voteDecision(roomId, decisionId, choice, comment);
+      await refreshIfOffline(roomId);
+    },
+
+    async closeDecision(decisionId: string, input: DecisionCloseInput) {
+      const roomId = activeIdRef.current;
+      if (!roomId) return;
+      await api.closeDecision(roomId, decisionId, input);
+      await refreshIfOffline(roomId);
+    },
+
+    async createWorkstream(input) {
+      const roomId = activeIdRef.current;
+      if (!roomId) throw new Error('No room selected');
+      const result = await api.createWorkstream(roomId, input);
+      const { rooms: list } = await api.rooms();
+      setRooms(list);
+      await refreshIfOffline(roomId);
+      return result.workstream;
+    },
+
+    openRoom(roomId: string) {
+      setActiveId(roomId);
     },
 
     async addRepo(input) {

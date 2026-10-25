@@ -3,6 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import type { RawData } from 'ws';
 import { readSessionToken, resolveToken } from './auth.js';
 import { HttpError } from './errors.js';
+import * as mission from './mission.js';
 import * as store from './store.js';
 import type {
   Member,
@@ -446,6 +447,10 @@ export function buildRoomState(roomId: string, principal: Principal): RoomState 
     presence: presenceList(roomId),
     voice: voiceParticipants(roomId),
     typing: typingList(roomId),
+    mission: mission.getMission(roomId) ?? mission.ensureMission(roomId, principal),
+    questions: mission.listQuestions(roomId),
+    decisions: mission.listDecisions(roomId),
+    ...mission.getFamilyView(roomId),
     ...(membership.role === 'admin'
       ? { joinRequests: store.listPendingJoinRequests(roomId) }
       : {}),
@@ -624,6 +629,23 @@ export function createRoomMessage(input: CreateRoomMessageInput): { message: Mes
 
   routeMentions(input.roomId, message);
   return { message, duplicate: false };
+}
+
+/* First-class room notices (decisions, milestones) reuse the message pipeline so
+ * unread counts, live clients, and trigger-mode agents all see them. */
+export function createSystemNotice(roomId: string, content: string, mentions: Mention[] = []): Message {
+  const message = store.insertMessage(
+    roomId,
+    { type: 'agent', id: 'system', name: 'System' },
+    'member',
+    'chat',
+    content,
+    { senderType: 'system', mentions },
+  );
+  broadcast(roomId, { type: 'message.new', message });
+  broadcastUnread(roomId);
+  routeMentions(roomId, message);
+  return message;
 }
 
 export interface EditRoomMessageInput {

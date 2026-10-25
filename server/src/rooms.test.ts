@@ -8,6 +8,7 @@ import { handleFromName, handleValidationError, normalizeHandle } from './handle
 
 const store = await import('./store.js');
 const auth = await import('./auth.js');
+const mission = await import('./mission.js');
 
 function userPrincipal(id: string, name: string): Principal {
   return { type: 'user', id, name };
@@ -126,6 +127,95 @@ test('agent connection keys rotate atomically', () => {
   assert.equal(auth.resolveToken(firstToken), null);
   assert.equal(auth.resolveToken(secondToken)?.type, 'agent');
   assert.equal(store.rotateAgentToken('missing-agent', auth.hashAgentToken(secondToken)), false);
+});
+
+function vote(choice: string, voterId: string) {
+  return {
+    voterType: 'user' as const,
+    voterId,
+    voterName: voterId,
+    choice,
+    comment: '',
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  };
+}
+
+test('decision tallies encode consent, quorum, and clear-lead rules', () => {
+  const proposal = { id: 'proposal', label: 'Adopt it' };
+  const consentBase = {
+    method: 'consent' as const,
+    quorum: 2,
+    options: [proposal],
+    votes: [vote('consent', 'ada')],
+  };
+
+  let tally = mission.tallyDecision(consentBase);
+  assert.equal(tally.quorumMet, false);
+  assert.equal(tally.ready, false);
+
+  tally = mission.tallyDecision({ ...consentBase, votes: [...consentBase.votes, vote('consent', 'grace')] });
+  assert.equal(tally.quorumMet, true);
+  assert.equal(tally.ready, true);
+
+  tally = mission.tallyDecision({
+    ...consentBase,
+    votes: [...consentBase.votes, vote('consent', 'grace'), vote('objection', 'linus')],
+  });
+  assert.equal(tally.objection, 1);
+  assert.equal(tally.ready, false, 'an objection blocks consent even when quorum is met');
+
+  const options = [
+    { id: 'web', label: 'Web first' },
+    { id: 'server', label: 'Server first' },
+  ];
+  tally = mission.tallyDecision({
+    method: 'majority',
+    quorum: 2,
+    options,
+    votes: [vote('web', 'ada'), vote('web', 'grace')],
+  });
+  assert.equal(tally.leadingOptionId, 'web');
+  assert.equal(tally.ready, true);
+
+  tally = mission.tallyDecision({
+    method: 'majority',
+    quorum: 2,
+    options,
+    votes: [vote('web', 'ada'), vote('server', 'grace')],
+  });
+  assert.equal(tally.leadingOptionId, null);
+  assert.equal(tally.ready, false, 'a tie is not a clear outcome');
+
+  tally = mission.tallyDecision({
+    method: 'admin',
+    quorum: 1,
+    options,
+    votes: [vote('abstain', 'ada')],
+  });
+  assert.equal(tally.ready, true, 'admin calls are ready once quorum votes, even on abstain');
+});
+
+test('decision choices allow abstention for every method', () => {
+  const consent = {
+    method: 'consent',
+    options: [{ id: 'p', label: 'Proposal' }],
+  } as unknown as Parameters<typeof mission.isValidChoice>[0];
+  assert.equal(mission.isValidChoice(consent, 'consent'), true);
+  assert.equal(mission.isValidChoice(consent, 'objection'), true);
+  assert.equal(mission.isValidChoice(consent, 'abstain'), true);
+  assert.equal(mission.isValidChoice(consent, 'p'), false);
+
+  const majority = {
+    method: 'majority',
+    options: [
+      { id: 'a', label: 'A' },
+      { id: 'b', label: 'B' },
+    ],
+  } as unknown as Parameters<typeof mission.isValidChoice>[0];
+  assert.equal(mission.isValidChoice(majority, 'a'), true);
+  assert.equal(mission.isValidChoice(majority, 'abstain'), true);
+  assert.equal(mission.isValidChoice(majority, 'consent'), false);
 });
 
 test('password hashes can be verified and replaced', () => {

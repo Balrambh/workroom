@@ -975,6 +975,658 @@ test('maintenance prunes terminal events and expires stale join requests', async
   }
 });
 
+test('mission, questions, and decisions support early human-agent collaboration', async () => {
+  const agentName = `MissionAgent-${RUN_ID}`;
+  const agent = await createAgent({ name: agentName, role: 'member' });
+  const viewer = await createAgent({ name: `MissionViewer-${RUN_ID}`, role: 'viewer' });
+
+  const profile = await api(server.base, `/agents/${agent.agent.id}/profile`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { capabilities: ['research', 'typescript'] },
+  });
+  assert.equal(profile.status, 200, JSON.stringify(profile.body));
+
+  const initial = await api(server.base, `/rooms/${roomId}/context`, { token: agent.token });
+  assert.equal(initial.status, 200, JSON.stringify(initial.body));
+  assert.equal(initial.body.mission.phase, 'frame');
+  assert.ok(initial.body.mission.guidance.length > 0);
+  assert.equal(initial.body.me.role, 'member');
+  assert.deepEqual(initial.body.me.capabilities, ['research', 'typescript']);
+  const teamAgent = initial.body.team.find((member: any) => member.id === agent.agent.id);
+  assert.deepEqual(teamAgent.capabilities, ['research', 'typescript']);
+  assert.equal(teamAgent.handle.length > 0, true);
+
+  const outsiderContext = await api(server.base, `/rooms/${roomId}/context`, { token: memberToken });
+  assert.equal(outsiderContext.status, 404);
+
+  const deniedMission = await api(server.base, `/rooms/${roomId}/mission`, {
+    method: 'PATCH',
+    token: agent.token,
+    body: { phase: 'explore' },
+  });
+  assert.equal(deniedMission.status, 403);
+
+  const missionUpdate = await api(server.base, `/rooms/${roomId}/mission`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: {
+      objective: 'Migrate the runtime without losing room history.',
+      successCriteria: 'All rooms load; message sequences are preserved; rollback is rehearsed.',
+      constraints: 'No downtime; keep the public API stable.',
+      phase: 'explore',
+      decisionMode: 'consent',
+      quorum: 2,
+    },
+  });
+  assert.equal(missionUpdate.status, 200, JSON.stringify(missionUpdate.body));
+  assert.equal(missionUpdate.body.phase, 'explore');
+  assert.equal(missionUpdate.body.decisionMode, 'consent');
+
+  const question = await api(server.base, `/rooms/${roomId}/questions`, {
+    method: 'POST',
+    token: agent.token,
+    body: {
+      title: 'Which runtime should run the first migration?',
+      detail: 'Compare Node 22 and the current runtime against rollback time.',
+      ownerType: 'agent',
+      ownerId: agent.agent.id,
+    },
+  });
+  assert.equal(question.status, 201, JSON.stringify(question.body));
+  assert.equal(question.body.ownerType, 'agent');
+  assert.equal(question.body.ownerId, agent.agent.id);
+  assert.equal(question.body.ownerName, agentName);
+
+  const resolved = await api(server.base, `/rooms/${roomId}/questions/${question.body.id}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: {
+      status: 'resolved',
+      resolution: 'Node 22 passes the rehearsal; rollback stayed under five minutes.',
+    },
+  });
+  assert.equal(resolved.status, 200, JSON.stringify(resolved.body));
+  assert.equal(resolved.body.status, 'resolved');
+  assert.ok(resolved.body.resolvedAt);
+
+  const unowned = await api(server.base, `/rooms/${roomId}/questions`, {
+    method: 'POST',
+    token: adminToken,
+    body: { title: 'Who owns the rollback rehearsal evidence?' },
+  });
+  assert.equal(unowned.status, 201);
+  assert.equal(unowned.body.ownerId, null);
+
+  const claimed = await api(server.base, `/rooms/${roomId}/questions/${unowned.body.id}`, {
+    method: 'PATCH',
+    token: agent.token,
+    body: { ownerType: 'agent', ownerId: agent.agent.id },
+  });
+  assert.equal(claimed.status, 200, JSON.stringify(claimed.body));
+  assert.equal(claimed.body.ownerId, agent.agent.id);
+
+  const deniedDelete = await api(server.base, `/rooms/${roomId}/questions/${unowned.body.id}`, {
+    method: 'DELETE',
+    token: viewer.token,
+  });
+  assert.equal(deniedDelete.status, 403);
+
+  const claimedResolve = await api(server.base, `/rooms/${roomId}/questions/${unowned.body.id}`, {
+    method: 'PATCH',
+    token: agent.token,
+    body: { status: 'resolved', resolution: 'Agent attached the rehearsal log to the repo.' },
+  });
+  assert.equal(claimedResolve.status, 200);
+
+  const contextAfterQuestions = await api(server.base, `/rooms/${roomId}/context`, { token: agent.token });
+  assert.equal(contextAfterQuestions.body.questions.open.length, 0);
+  assert.equal(contextAfterQuestions.body.questions.recentlyResolved.length >= 2, true);
+
+  const beforeSeq = contextAfterQuestions.body.messages.lastSeq;
+  const consent = await api(server.base, `/rooms/${roomId}/decisions`, {
+    method: 'POST',
+    token: agent.token,
+    body: {
+      title: 'Adopt Node 22 for the first migration?',
+      context: 'The rehearsal passed and rollback stayed inside the constraint.',
+      method: 'consent',
+      quorum: 2,
+      options: ['Adopt Node 22'],
+      notifyAgents: true,
+    },
+  });
+  assert.equal(consent.status, 201, JSON.stringify(consent.body));
+  assert.equal(consent.body.method, 'consent');
+  assert.equal(consent.body.status, 'open');
+  assert.equal(consent.body.tally.ready, false);
+
+  const notice = await api(server.base, `/rooms/${roomId}/messages?after_seq=${beforeSeq}`, {
+    token: adminToken,
+  });
+  assert.equal(notice.status, 200);
+  const decisionNotice = notice.body.messages.find(
+    (message: any) => message.senderType === 'system' && message.content.includes('Adopt Node 22'),
+  );
+  assert.ok(decisionNotice, 'opening a decision should post a system notice');
+  assert.equal(decisionNotice.mentions.length > 0, true, 'the notice should wake eligible agents');
+
+  const viewerVote = await api(server.base, `/rooms/${roomId}/decisions/${consent.body.id}/votes`, {
+    method: 'POST',
+    token: viewer.token,
+    body: { choice: 'consent' },
+  });
+  assert.equal(viewerVote.status, 403);
+
+  const agentVote = await api(server.base, `/rooms/${roomId}/decisions/${consent.body.id}/votes`, {
+    method: 'POST',
+    token: agent.token,
+    body: { choice: 'consent', comment: 'I ran the rehearsal.' },
+  });
+  assert.equal(agentVote.status, 200, JSON.stringify(agentVote.body));
+  assert.equal(agentVote.body.tally.consent, 1);
+  assert.equal(agentVote.body.tally.ready, false);
+
+  const earlyClose = await api(server.base, `/rooms/${roomId}/decisions/${consent.body.id}`, {
+    method: 'PATCH',
+    token: agent.token,
+    body: { status: 'decided' },
+  });
+  assert.equal(earlyClose.status, 409);
+
+  const adminVote = await api(server.base, `/rooms/${roomId}/decisions/${consent.body.id}/votes`, {
+    method: 'POST',
+    token: adminToken,
+    body: { choice: 'consent' },
+  });
+  assert.equal(adminVote.status, 200);
+  assert.equal(adminVote.body.tally.quorumMet, true);
+  assert.equal(adminVote.body.tally.ready, true);
+
+  const consentClose = await api(server.base, `/rooms/${roomId}/decisions/${consent.body.id}`, {
+    method: 'PATCH',
+    token: agent.token,
+    body: { status: 'decided', rationale: 'No objections; rehearsal evidence attached.' },
+  });
+  assert.equal(consentClose.status, 200, JSON.stringify(consentClose.body));
+  assert.equal(consentClose.body.status, 'decided');
+  assert.equal(consentClose.body.decidedOptionLabel, 'Adopt Node 22');
+  assert.equal(consentClose.body.decidedById, agent.agent.id);
+
+  const lateVote = await api(server.base, `/rooms/${roomId}/decisions/${consent.body.id}/votes`, {
+    method: 'POST',
+    token: adminToken,
+    body: { choice: 'abstain' },
+  });
+  assert.equal(lateVote.status, 409);
+
+  const majority = await api(server.base, `/rooms/${roomId}/decisions`, {
+    method: 'POST',
+    token: agent.token,
+    body: {
+      title: 'Which workstream starts first?',
+      method: 'majority',
+      quorum: 2,
+      options: ['Web', 'Server'],
+      notifyAgents: false,
+    },
+  });
+  assert.equal(majority.status, 201, JSON.stringify(majority.body));
+  const [webOption, serverOption] = majority.body.options;
+
+  await api(server.base, `/rooms/${roomId}/decisions/${majority.body.id}/votes`, {
+    method: 'POST',
+    token: agent.token,
+    body: { choice: webOption.id },
+  });
+  await api(server.base, `/rooms/${roomId}/decisions/${majority.body.id}/votes`, {
+    method: 'POST',
+    token: adminToken,
+    body: { choice: serverOption.id },
+  });
+  const tie = await api(server.base, `/rooms/${roomId}/decisions/${majority.body.id}/votes`, {
+    method: 'POST',
+    token: adminToken,
+    body: { choice: serverOption.id },
+  });
+  assert.equal(tie.status, 200);
+  assert.equal(tie.body.tally.leadingOptionId, null);
+  assert.equal(tie.body.tally.ready, false);
+
+  const tieClose = await api(server.base, `/rooms/${roomId}/decisions/${majority.body.id}`, {
+    method: 'PATCH',
+    token: agent.token,
+    body: { status: 'decided', optionId: webOption.id },
+  });
+  assert.equal(tieClose.status, 409);
+
+  const overrideWithoutRationale = await api(
+    server.base,
+    `/rooms/${roomId}/decisions/${majority.body.id}`,
+    { method: 'PATCH', token: adminToken, body: { status: 'decided', optionId: serverOption.id } },
+  );
+  assert.equal(overrideWithoutRationale.status, 400);
+
+  const override = await api(server.base, `/rooms/${roomId}/decisions/${majority.body.id}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: {
+      status: 'decided',
+      optionId: serverOption.id,
+      rationale: 'Server unblocks both workstreams; web can follow without a contract change.',
+    },
+  });
+  assert.equal(override.status, 200, JSON.stringify(override.body));
+  assert.equal(override.body.decidedOptionId, serverOption.id);
+
+  const objection = await api(server.base, `/rooms/${roomId}/decisions`, {
+    method: 'POST',
+    token: agent.token,
+    body: {
+      title: 'Freeze the schema before migration?',
+      method: 'consent',
+      quorum: 2,
+      options: ['Freeze the schema'],
+      notifyAgents: false,
+    },
+  });
+  assert.equal(objection.status, 201);
+  await api(server.base, `/rooms/${roomId}/decisions/${objection.body.id}/votes`, {
+    method: 'POST',
+    token: agent.token,
+    body: { choice: 'objection', comment: 'The migration may need one additive column.' },
+  });
+  const objectionTally = await api(
+    server.base,
+    `/rooms/${roomId}/decisions/${objection.body.id}/votes`,
+    { method: 'POST', token: adminToken, body: { choice: 'consent' } },
+  );
+  assert.equal(objectionTally.body.tally.ready, false);
+  assert.equal(objectionTally.body.tally.objection, 1);
+
+  const objectionClose = await api(server.base, `/rooms/${roomId}/decisions/${objection.body.id}`, {
+    method: 'PATCH',
+    token: agent.token,
+    body: { status: 'decided' },
+  });
+  assert.equal(objectionClose.status, 409);
+
+  const objectionOverride = await api(server.base, `/rooms/${roomId}/decisions/${objection.body.id}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: {
+      status: 'decided',
+      rationale: 'The additive column is backward compatible, so the freeze holds.',
+    },
+  });
+  assert.equal(objectionOverride.status, 200, JSON.stringify(objectionOverride.body));
+
+  const state = await roomState();
+  assert.equal(state.mission.phase, 'explore');
+  assert.equal(state.questions.some((item: any) => item.id === question.body.id), true);
+  assert.equal(state.decisions.some((item: any) => item.id === consent.body.id), true);
+
+  const viewerContext = await api(server.base, `/rooms/${roomId}/context`, { token: viewer.token });
+  assert.equal(viewerContext.status, 200);
+  assert.equal(viewerContext.body.me.role, 'viewer');
+  assert.equal(
+    viewerContext.body.nextActions.some((action: any) => action.kind === 'decision.vote'),
+    false,
+    'viewers should not be prompted to vote',
+  );
+});
+
+test('workstreams and decision dependencies keep a large mission coherent', async () => {
+  const suffix = run();
+  const parent = await api(server.base, '/rooms', {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      name: `Program ${suffix}`,
+      topic: 'multi-workstream mission',
+      mode: 'code',
+      visibility: 'unlisted',
+    },
+  });
+  assert.equal(parent.status, 201, JSON.stringify(parent.body));
+  const parentId = parent.body.room.id as string;
+
+  const parentMission = await api(server.base, `/rooms/${parentId}/mission`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: {
+      objective: 'Ship the platform rewrite.',
+      constraints: 'No downtime.',
+      decisionMode: 'majority',
+      quorum: 3,
+    },
+  });
+  assert.equal(parentMission.status, 200, JSON.stringify(parentMission.body));
+
+  const proposed = await api(server.base, `/rooms/${parentId}/workstreams`, {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      name: 'Auth workstream',
+      topic: 'Authentication',
+      objective: 'Replace sessions without logging anyone out.',
+    },
+  });
+  assert.equal(proposed.status, 201, JSON.stringify(proposed.body));
+  const childId = proposed.body.room.id as string;
+  assert.equal(proposed.body.room.parentRoomId, parentId);
+  assert.equal(proposed.body.room.visibility, 'unlisted');
+  assert.equal(proposed.body.workstream.phase, 'frame');
+  assert.equal(proposed.body.workstream.objective, 'Replace sessions without logging anyone out.');
+
+  const childMission = await api(server.base, `/rooms/${childId}/mission`, { token: adminToken });
+  assert.equal(childMission.status, 200);
+  assert.equal(childMission.body.constraints, 'No downtime.');
+  assert.equal(childMission.body.decisionMode, 'majority');
+  assert.equal(childMission.body.quorum, 3);
+
+  const parentContext = await api(server.base, `/rooms/${parentId}/context`, { token: adminToken });
+  assert.equal(parentContext.status, 200);
+  assert.equal(parentContext.body.workstreams.length, 1);
+  assert.equal(parentContext.body.workstreams[0].id, childId);
+
+  const childContext = await api(server.base, `/rooms/${childId}/context`, { token: adminToken });
+  assert.equal(childContext.status, 200);
+  assert.equal(childContext.body.parent.id, parentId);
+  assert.equal(
+    childContext.body.team.some((member: any) => member.type === 'user' && member.name === 'Admin'),
+    true,
+    'human members are copied into the workstream',
+  );
+
+  const parentDecision = await api(server.base, `/rooms/${parentId}/decisions`, {
+    method: 'POST',
+    token: adminToken,
+    body: {
+      title: 'Approve the session interface?',
+      method: 'admin',
+      quorum: 1,
+      options: ['Approve', 'Reject'],
+      notifyAgents: false,
+    },
+  });
+  assert.equal(parentDecision.status, 201, JSON.stringify(parentDecision.body));
+  await api(server.base, `/rooms/${parentId}/decisions/${parentDecision.body.id}/votes`, {
+    method: 'POST',
+    token: adminToken,
+    body: { choice: parentDecision.body.options[0].id },
+  });
+
+  const childAgentResponse = await api(server.base, `/rooms/${childId}/agents`, {
+    method: 'POST',
+    token: adminToken,
+    body: { name: `ChildAgent-${suffix}`, role: 'member' },
+  });
+  assert.equal(childAgentResponse.status, 201, JSON.stringify(childAgentResponse.body));
+  const childAgent = childAgentResponse.body;
+
+  const childDecision = await api(server.base, `/rooms/${childId}/decisions`, {
+    method: 'POST',
+    token: childAgent.token,
+    body: {
+      title: 'Which token format do we ship?',
+      method: 'admin',
+      quorum: 1,
+      options: ['Opaque', 'JWT'],
+      notifyAgents: false,
+      dependsOn: [{ roomId: parentId, decisionId: parentDecision.body.id }],
+    },
+  });
+  assert.equal(childDecision.status, 201, JSON.stringify(childDecision.body));
+  assert.equal(childDecision.body.dependencies.length, 1);
+  assert.equal(childDecision.body.dependencies[0].status, 'open');
+
+  const childVote = await api(server.base, `/rooms/${childId}/decisions/${childDecision.body.id}/votes`, {
+    method: 'POST',
+    token: childAgent.token,
+    body: { choice: childDecision.body.options[0].id },
+  });
+  assert.equal(childVote.status, 200);
+  assert.equal(childVote.body.tally.ready, true);
+
+  const blockedClose = await api(server.base, `/rooms/${childId}/decisions/${childDecision.body.id}`, {
+    method: 'PATCH',
+    token: childAgent.token,
+    body: { status: 'decided', optionId: childDecision.body.options[0].id },
+  });
+  assert.equal(blockedClose.status, 409);
+  assert.match(blockedClose.body.error, /blocked/i);
+
+  const directClose = await api(server.base, `/rooms/${parentId}/decisions/${parentDecision.body.id}`, {
+    method: 'PATCH',
+    token: adminToken,
+    body: { status: 'decided', optionId: parentDecision.body.options[0].id },
+  });
+  assert.equal(directClose.status, 200, JSON.stringify(directClose.body));
+
+  const childAfter = await api(server.base, `/rooms/${childId}`, { token: adminToken });
+  assert.equal(childAfter.status, 200);
+  const childDecisionAfter = childAfter.body.decisions.find(
+    (decision: any) => decision.id === childDecision.body.id,
+  );
+  assert.equal(childDecisionAfter.dependencies[0].status, 'decided');
+  const dependencyNotice = childAfter.body.messages.find(
+    (message: any) => message.senderType === 'system' && message.content.includes('unblocked'),
+  );
+  assert.ok(dependencyNotice, 'closing a blocking decision should notify the dependent room');
+  assert.equal(
+    dependencyNotice.mentions.some((mention: any) => mention.id === childAgent.agent.id),
+    true,
+    'the dependency notice should wake the dependent room agents',
+  );
+
+  const closeNow = await api(server.base, `/rooms/${childId}/decisions/${childDecision.body.id}`, {
+    method: 'PATCH',
+    token: childAgent.token,
+    body: { status: 'decided', optionId: childDecision.body.options[0].id },
+  });
+  assert.equal(closeNow.status, 200, JSON.stringify(closeNow.body));
+
+  const unrelated = await api(server.base, '/rooms', {
+    method: 'POST',
+    token: adminToken,
+    body: { name: `Unrelated ${suffix}`, mode: 'chat' },
+  });
+  assert.equal(unrelated.status, 201);
+  const unrelatedDecision = await api(
+    server.base,
+    `/rooms/${unrelated.body.room.id}/decisions`,
+    {
+      method: 'POST',
+      token: adminToken,
+      body: {
+        title: 'Unrelated decision',
+        method: 'admin',
+        quorum: 1,
+        options: ['One', 'Two'],
+        notifyAgents: false,
+      },
+    },
+  );
+  assert.equal(unrelatedDecision.status, 201);
+  const invalidDependency = await api(server.base, `/rooms/${childId}/decisions`, {
+    method: 'POST',
+    token: childAgent.token,
+    body: {
+      title: 'Cross-family dependency',
+      method: 'admin',
+      quorum: 1,
+      options: ['One', 'Two'],
+      notifyAgents: false,
+      dependsOn: [{ roomId: unrelated.body.room.id, decisionId: unrelatedDecision.body.id }],
+    },
+  });
+  assert.equal(invalidDependency.status, 400);
+  assert.match(invalidDependency.body.error, /parent|workstreams/i);
+
+  const deleteParent = await api(server.base, `/rooms/${parentId}`, {
+    method: 'DELETE',
+    token: adminToken,
+  });
+  assert.equal(deleteParent.status, 200);
+  const survivingChild = await api(server.base, `/rooms/${childId}`, { token: adminToken });
+  assert.equal(survivingChild.status, 200);
+  assert.equal(survivingChild.body.parent, null);
+  assert.equal(survivingChild.body.room.parentRoomId, null);
+});
+
+test('MCP bridge exposes mission collaboration over stdio', async () => {
+  const agent = await createAgent({ name: `McpAgent-${RUN_ID}`, role: 'member' });
+  const bridgePath = resolve(serverDir, '..', 'connector', 'roomforge-mcp.mjs');
+  const child = spawn(process.execPath, [bridgePath], {
+    env: {
+      ...process.env,
+      ROOMFORGE_URL: server.base,
+      ROOMFORGE_TOKEN: agent.token,
+      ROOMFORGE_ROOM_ID: roomId,
+    },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  let stdout = '';
+  let stderr = '';
+  const waiting = new Map<number, { resolve: (value: any) => void; reject: (error: Error) => void }>();
+  let nextId = 1;
+
+  child.stdout?.on('data', (chunk) => {
+    stdout += chunk.toString();
+    let newline = stdout.indexOf('\n');
+    while (newline !== -1) {
+      const line = stdout.slice(0, newline).trim();
+      stdout = stdout.slice(newline + 1);
+      if (line) {
+        try {
+          const message = JSON.parse(line);
+          if (typeof message.id === 'number') {
+            const pending = waiting.get(message.id);
+            if (pending) {
+              waiting.delete(message.id);
+              pending.resolve(message);
+            }
+          }
+        } catch {
+          // ignore malformed bridge output; the timeout below catches it
+        }
+      }
+      newline = stdout.indexOf('\n');
+    }
+  });
+  child.stderr?.on('data', (chunk) => {
+    stderr += chunk.toString();
+  });
+
+  function rpc(method: string, params?: unknown): Promise<any> {
+    const id = nextId;
+    nextId += 1;
+    return new Promise((resolveRpc, rejectRpc) => {
+      const timer = setTimeout(() => {
+        waiting.delete(id);
+        rejectRpc(new Error(`MCP ${method} timed out\n${stderr}`));
+      }, 10_000);
+      waiting.set(id, {
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolveRpc(value);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          rejectRpc(error);
+        },
+      });
+      child.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`);
+    });
+  }
+
+  try {
+    const initialized = await rpc('initialize', {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'integration-test', version: '1.0.0' },
+    });
+    assert.equal(initialized.result.serverInfo.name, 'roomforge');
+    assert.equal(initialized.result.protocolVersion, '2025-06-18');
+    child.stdin?.write(`${JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' })}\n`);
+
+    const listed = await rpc('tools/list');
+    const toolNames = listed.result.tools.map((tool: any) => tool.name);
+    assert.ok(toolNames.includes('roomforge_context'));
+    assert.ok(toolNames.includes('roomforge_open_decision'));
+    assert.ok(toolNames.includes('roomforge_vote'));
+    assert.ok(toolNames.includes('roomforge_create_workstream'));
+
+    const callTool = async (name: string, args: Record<string, unknown> = {}) => {
+      const response = await rpc('tools/call', { name, arguments: args });
+      assert.equal(response.result.isError, false, JSON.stringify(response.result));
+      return JSON.parse(response.result.content[0].text);
+    };
+
+    const context = await callTool('roomforge_context', { limit: 5 });
+    assert.equal(context.room.id, roomId);
+    assert.equal(context.me.name, `McpAgent-${RUN_ID}`);
+    assert.ok(context.mission);
+
+    const question = await callTool('roomforge_create_question', {
+      title: 'Can an MCP agent contribute during framing?',
+      detail: 'Exercise the bridge end to end.',
+    });
+    assert.equal(question.ownerId, agent.agent.id);
+
+    const resolved = await callTool('roomforge_update_question', {
+      questionId: question.id,
+      status: 'resolved',
+      resolution: 'Yes: context, questions, votes, and closure all work over MCP.',
+    });
+    assert.equal(resolved.status, 'resolved');
+
+    const decision = await callTool('roomforge_open_decision', {
+      title: 'Ship the MCP bridge?',
+      method: 'consent',
+      quorum: 1,
+      options: ['Ship it'],
+      notifyAgents: false,
+    });
+    assert.equal(decision.status, 'open');
+
+    const voted = await callTool('roomforge_vote', {
+      decisionId: decision.id,
+      choice: 'consent',
+      comment: 'Exercised over stdio.',
+    });
+    assert.equal(voted.tally.ready, true);
+
+    const closed = await callTool('roomforge_close_decision', {
+      decisionId: decision.id,
+      rationale: 'The bridge works end to end.',
+    });
+    assert.equal(closed.status, 'decided');
+    assert.equal(closed.decidedOptionLabel, 'Ship it');
+
+    const resource = await rpc('resources/read', { uri: 'roomforge://mission' });
+    const missionResource = JSON.parse(resource.result.contents[0].text);
+    assert.equal(missionResource.roomId, roomId);
+
+    const familyResource = await rpc('resources/read', { uri: 'roomforge://workstreams' });
+    const family = JSON.parse(familyResource.result.contents[0].text);
+    assert.equal(family.parent, null);
+    assert.deepEqual(family.workstreams, []);
+
+    assert.equal(stderr.includes(agent.token), false, 'the bridge must never print its token');
+  } finally {
+    child.kill();
+    await Promise.race([
+      new Promise<void>((resolveExit) => child.once('exit', () => resolveExit())),
+      sleep(5_000).then(() => {
+        if (child.exitCode === null) child.kill('SIGKILL');
+      }),
+    ]);
+  }
+});
+
 test('production refuses to start without JWT_SECRET', async () => {
   const child = spawn(process.execPath, ['--import', 'tsx', 'src/index.ts'], {
     cwd: serverDir,

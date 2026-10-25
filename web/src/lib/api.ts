@@ -2,17 +2,26 @@ import type {
   AgentProfile,
   AgentProfilePatch,
   CreateAgentResult,
+  Decision,
+  DecisionCloseInput,
+  DecisionInput,
   DeliveryMode,
   JoinState,
   Member,
   Message,
   MessageKind,
+  Mission,
+  MissionPatch,
+  MissionQuestion,
   PresenceEntry,
   PresenceStatus,
   Profile,
+  QuestionInput,
+  QuestionPatch,
   Repo,
   Role,
   PublicRoom,
+  Room,
   RoomMode,
   RoomPreview,
   RoomState,
@@ -26,6 +35,7 @@ import type {
   TriggerTestResult,
   UserProfile,
   UserProfilePatch,
+  WorkstreamSummary,
 } from './types';
 
 export class ApiError extends Error {
@@ -275,6 +285,53 @@ export const api = {
 
   deleteTask(roomId: string, taskId: string): Promise<{ ok: boolean }> {
     return request(`/rooms/${roomId}/tasks/${taskId}`, { method: 'DELETE' });
+  },
+
+  updateMission(roomId: string, patch: MissionPatch): Promise<Mission> {
+    return request(`/rooms/${roomId}/mission`, { method: 'PATCH', body: patch });
+  },
+
+  createQuestion(roomId: string, input: QuestionInput): Promise<MissionQuestion> {
+    return request(`/rooms/${roomId}/questions`, { method: 'POST', body: input });
+  },
+
+  updateQuestion(
+    roomId: string,
+    questionId: string,
+    patch: QuestionPatch,
+  ): Promise<MissionQuestion> {
+    return request(`/rooms/${roomId}/questions/${questionId}`, { method: 'PATCH', body: patch });
+  },
+
+  deleteQuestion(roomId: string, questionId: string): Promise<{ ok: boolean }> {
+    return request(`/rooms/${roomId}/questions/${questionId}`, { method: 'DELETE' });
+  },
+
+  createDecision(roomId: string, input: DecisionInput): Promise<Decision> {
+    return request(`/rooms/${roomId}/decisions`, { method: 'POST', body: input });
+  },
+
+  voteDecision(
+    roomId: string,
+    decisionId: string,
+    choice: string,
+    comment = '',
+  ): Promise<Decision> {
+    return request(`/rooms/${roomId}/decisions/${decisionId}/votes`, {
+      method: 'POST',
+      body: { choice, comment },
+    });
+  },
+
+  closeDecision(roomId: string, decisionId: string, input: DecisionCloseInput): Promise<Decision> {
+    return request(`/rooms/${roomId}/decisions/${decisionId}`, { method: 'PATCH', body: input });
+  },
+
+  createWorkstream(
+    roomId: string,
+    input: { name: string; topic: string; objective: string },
+  ): Promise<{ room: Room; workstream: WorkstreamSummary }> {
+    return request(`/rooms/${roomId}/workstreams`, { method: 'POST', body: input });
   },
 };
 

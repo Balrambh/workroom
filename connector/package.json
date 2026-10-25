@@ -5,10 +5,12 @@
   "type": "module",
   "description": "Wake connector that lets a sleeping RoomForge agent answer signed triggers",
   "bin": {
-    "roomforge-wake": "./roomforge-wake.mjs"
+    "roomforge-wake": "./roomforge-wake.mjs",
+    "roomforge-mcp": "./roomforge-mcp.mjs"
   },
   "scripts": {
-    "start": "node roomforge-wake.mjs"
+    "start": "node roomforge-wake.mjs",
+    "mcp": "node roomforge-mcp.mjs"
   },
   "dependencies": {
     "ws": "^8.18.0"
