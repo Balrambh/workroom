@@ -19,6 +19,7 @@ export type DecisionMethod = 'admin' | 'consent' | 'majority' | 'quorum';
 export type DecisionStatus = 'open' | 'decided' | 'withdrawn';
 export type QuestionStatus = 'open' | 'resolved' | 'parked';
 export type WorkspaceTab = 'mission' | 'people' | 'tasks' | 'repos' | 'activity';
+export type WorkspacePanelIntent = 'new-task' | 'new-agent';
 
 export interface ProfileTarget {
   type: PrincipalType;

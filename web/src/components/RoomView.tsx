@@ -3,6 +3,7 @@ import type {
   PrincipalType,
   RoomActions,
   RoomState,
+  WorkspacePanelIntent,
   WorkspacePanelRequest,
 } from '../lib/types';
 import { useRoomVoice } from '../lib/useRoomVoice';
@@ -12,6 +13,8 @@ import { ChatPanel } from './ChatPanel';
 import { LinkifyText } from './LinkifyText';
 import { RightPanel } from './RightPanel';
 import type { PanelTab } from './RightPanel';
+import { RoomCockpit } from './RoomCockpit';
+import { RoomPulse } from './RoomPulse';
 import { RoomSettingsDialog } from './RoomSettingsDialog';
 import { VoiceStage } from './VoiceStage';
 import {
@@ -56,6 +59,8 @@ export function RoomView({
   const [detailsOpen, setDetailsOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<PanelTab>('people');
+  const [panelIntent, setPanelIntent] = useState<WorkspacePanelIntent | null>(null);
+  const [panelIntentNonce, setPanelIntentNonce] = useState(0);
   const pendingRequests = state.me.role === 'admin' ? state.joinRequests ?? [] : [];
   const pendingCount = pendingRequests.length;
   const [alertDismissed, setAlertDismissed] = useState(false);
@@ -76,11 +81,13 @@ export function RoomView({
   useEffect(() => {
     setDetailsOpen(false);
     setSettingsOpen(false);
+    setPanelIntent(null);
   }, [state.room.id]);
 
   useEffect(() => {
     if (!panelRequest || panelRequest.roomId !== state.room.id) return;
     setPanelTab(panelRequest.tab);
+    setPanelIntent(null);
     setDetailsOpen(true);
   }, [panelRequest, state.room.id]);
 
@@ -92,15 +99,30 @@ export function RoomView({
   useEffect(() => {
     if (!detailsOpen) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setDetailsOpen(false);
+      if (event.key === 'Escape') {
+        setDetailsOpen(false);
+        setPanelIntent(null);
+      }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [detailsOpen]);
 
-  function openPanel(tab: PanelTab) {
+  function openPanel(tab: PanelTab, intent?: WorkspacePanelIntent) {
     setPanelTab(tab);
+    setPanelIntent(intent ?? null);
+    if (intent) setPanelIntentNonce((nonce) => nonce + 1);
     setDetailsOpen(true);
+  }
+
+  function openWorkspace() {
+    setPanelIntent(null);
+    setDetailsOpen(true);
+  }
+
+  function closeWorkspace() {
+    setDetailsOpen(false);
+    setPanelIntent(null);
   }
 
   return (
@@ -220,7 +242,7 @@ export function RoomView({
             }
             aria-expanded={detailsOpen}
             aria-controls="room-details-panel"
-            onClick={() => setDetailsOpen(true)}
+            onClick={openWorkspace}
           >
             <PanelsIcon size={14} />
             <span className="workspace-label">Workspace</span>
@@ -228,6 +250,8 @@ export function RoomView({
           </button>
         </div>
       </header>
+
+      <RoomPulse state={state} connected={connected} onOpenPanel={openPanel} />
 
       {pendingCount > 0 && !alertDismissed ? (
         <div className="join-alert" role="status" aria-live="polite">
@@ -265,6 +289,19 @@ export function RoomView({
             me={state.me}
             connected={connected}
             onOpenProfile={onOpenMemberProfile}
+            emptyContent={
+              <RoomCockpit
+                state={state}
+                connected={connected}
+                voice={voice}
+                onOpenPanel={openPanel}
+                onCopyInvite={() => {
+                  if (!state.room.code) return;
+                  actions.copy(`${window.location.origin}/room/${state.room.code}`, 'Room link');
+                }}
+                onOpenMemberProfile={onOpenMemberProfile}
+              />
+            }
           />
         </div>
         <ChatPanel
@@ -280,7 +317,7 @@ export function RoomView({
           type="button"
           className="drawer-backdrop"
           aria-label="Close workspace"
-          onClick={() => setDetailsOpen(false)}
+          onClick={closeWorkspace}
         />
       ) : null}
 
@@ -291,7 +328,7 @@ export function RoomView({
             type="button"
             className="icon-btn"
             aria-label="Close workspace"
-            onClick={() => setDetailsOpen(false)}
+            onClick={closeWorkspace}
           >
             <XIcon size={16} />
           </button>
@@ -300,7 +337,12 @@ export function RoomView({
           state={state}
           actions={actions}
           tab={panelTab}
-          onTabChange={setPanelTab}
+          intent={panelIntent}
+          intentNonce={panelIntentNonce}
+          onTabChange={(tab) => {
+            setPanelTab(tab);
+            setPanelIntent(null);
+          }}
           onOpenProfile={onOpenMemberProfile}
         />
       </div>

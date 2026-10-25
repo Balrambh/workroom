@@ -1,5 +1,11 @@
 import type { ReactNode } from 'react';
-import type { PrincipalType, RoomActions, RoomState, WorkspaceTab } from '../lib/types';
+import type {
+  PrincipalType,
+  RoomActions,
+  RoomState,
+  WorkspacePanelIntent,
+  WorkspaceTab,
+} from '../lib/types';
 import { ActivityIcon, BranchIcon, CheckIcon, CompassIcon, UsersIcon } from './Icons';
 import { LiveFeed } from './LiveFeed';
 import { MissionPanel } from './MissionPanel';
@@ -13,6 +19,8 @@ interface RightPanelProps {
   state: RoomState;
   actions: RoomActions;
   tab: PanelTab;
+  intent: WorkspacePanelIntent | null;
+  intentNonce: number;
   onTabChange: (tab: PanelTab) => void;
   onOpenProfile: (type: PrincipalType, id: string) => void;
 }
@@ -21,6 +29,8 @@ export function RightPanel({
   state,
   actions,
   tab,
+  intent,
+  intentNonce,
   onTabChange,
   onOpenProfile,
 }: RightPanelProps) {
@@ -79,10 +89,20 @@ export function RightPanel({
         <MissionPanel state={state} actions={actions} />
       ) : null}
       {activeTab === 'people' ? (
-        <PeoplePanel state={state} actions={actions} onOpenProfile={onOpenProfile} />
+        <PeoplePanel
+          state={state}
+          actions={actions}
+          onOpenProfile={onOpenProfile}
+          openFormNonce={intent === 'new-agent' ? intentNonce : undefined}
+        />
       ) : null}
       {activeTab === 'tasks' ? (
-        <TasksPanel state={state} actions={actions} onOpenProfile={onOpenProfile} />
+        <TasksPanel
+          state={state}
+          actions={actions}
+          onOpenProfile={onOpenProfile}
+          openFormNonce={intent === 'new-task' ? intentNonce : undefined}
+        />
       ) : null}
       {activeTab === 'repos' ? <ReposPanel state={state} actions={actions} /> : null}
       {activeTab === 'activity' ? (

@@ -28,7 +28,8 @@ db.exec(`
     location TEXT NOT NULL DEFAULT '',
     website TEXT NOT NULL DEFAULT '',
     show_rooms INTEGER NOT NULL DEFAULT 1,
-    avatar TEXT
+    avatar TEXT,
+    session_version INTEGER NOT NULL DEFAULT 0
   );
 
   CREATE TABLE IF NOT EXISTS rooms (
@@ -124,7 +125,8 @@ db.exec(`
     created_by_type TEXT NOT NULL,
     created_by_id TEXT NOT NULL,
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    client_task_id TEXT
   );
 
   CREATE TABLE IF NOT EXISTS activity (
@@ -299,6 +301,7 @@ addColumn('messages', 'edited_at', 'TEXT');
 
 addColumn('users', 'handle', 'TEXT');
 addColumn('users', 'avatar', 'TEXT');
+addColumn('users', 'session_version', 'INTEGER NOT NULL DEFAULT 0');
 addColumn('users', 'headline', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'bio', "TEXT NOT NULL DEFAULT ''");
 addColumn('users', 'location', "TEXT NOT NULL DEFAULT ''");
@@ -311,6 +314,7 @@ addColumn('agents', 'bio', "TEXT NOT NULL DEFAULT ''");
 addColumn('agents', 'website', "TEXT NOT NULL DEFAULT ''");
 addColumn('agents', 'capabilities', "TEXT NOT NULL DEFAULT ''");
 addColumn('agents', 'created_by_type', "TEXT NOT NULL DEFAULT 'user'");
+addColumn('tasks', 'client_task_id', 'TEXT');
 
 db.exec(`
   UPDATE agents SET headline = description
@@ -372,6 +376,10 @@ db.exec(`
     ON messages(room_id, sender_id, client_message_id)
     WHERE client_message_id IS NOT NULL;
   CREATE INDEX IF NOT EXISTS idx_messages_room_seq ON messages(room_id, seq);
+  CREATE UNIQUE INDEX IF NOT EXISTS idx_tasks_client
+    ON tasks(room_id, created_by_type, created_by_id, client_task_id)
+    WHERE client_task_id IS NOT NULL;
+  CREATE INDEX IF NOT EXISTS idx_tasks_assignee ON tasks(room_id, assignee_type, assignee_id);
   CREATE UNIQUE INDEX IF NOT EXISTS idx_users_handle ON users(handle COLLATE NOCASE)
     WHERE handle IS NOT NULL AND handle <> '';
   CREATE UNIQUE INDEX IF NOT EXISTS idx_agents_handle ON agents(handle COLLATE NOCASE)
